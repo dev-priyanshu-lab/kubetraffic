@@ -1,0 +1,16 @@
+# INVALID: a version weight above 100 violates the CRD schema maximum.
+apiVersion: traffic.kubetraffic.io/v1alpha1
+kind: TrafficRoute
+metadata:
+  name: invalid-weight-range
+  namespace: demo
+spec:
+  host: api.example.com
+  routes:
+    - path: /payment
+      backend:
+        service: payment
+        port: 8080
+      versions:
+        - name: v1
+          weight: 150

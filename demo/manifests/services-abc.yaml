@@ -1,0 +1,190 @@
+# Three single-version background services. They carry different baseline
+# latencies so dashboards and routing demos have something to show.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: service-a
+  namespace: demo
+  labels: &a-labels
+    app.kubernetes.io/name: service-a
+    app.kubernetes.io/version: v1
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: kubetraffic-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: service-a
+  template:
+    metadata:
+      labels: *a-labels
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: app
+          image: kubetraffic/sample-app:dev
+          imagePullPolicy: IfNotPresent
+          ports: [{ name: http, containerPort: 8080 }]
+          env:
+            - { name: APP_NAME, value: service-a }
+            - { name: APP_VERSION, value: v1 }
+            - { name: LATENCY_MS, value: "5" }
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - name: POD_NAMESPACE
+              valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+            - name: NODE_NAME
+              valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
+          readinessProbe: { httpGet: { path: /readyz, port: http }, initialDelaySeconds: 2, periodSeconds: 5 }
+          livenessProbe: { httpGet: { path: /healthz, port: http }, initialDelaySeconds: 5, periodSeconds: 10 }
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 64Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: service-a
+  namespace: demo
+  labels:
+    app.kubernetes.io/name: service-a
+    app.kubernetes.io/part-of: kubetraffic-demo
+spec:
+  selector:
+    app.kubernetes.io/name: service-a
+  ports: [{ name: http, port: 8080, targetPort: http }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: service-b
+  namespace: demo
+  labels: &b-labels
+    app.kubernetes.io/name: service-b
+    app.kubernetes.io/version: v1
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: kubetraffic-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: service-b
+  template:
+    metadata:
+      labels: *b-labels
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: app
+          image: kubetraffic/sample-app:dev
+          imagePullPolicy: IfNotPresent
+          ports: [{ name: http, containerPort: 8080 }]
+          env:
+            - { name: APP_NAME, value: service-b }
+            - { name: APP_VERSION, value: v1 }
+            - { name: LATENCY_MS, value: "15" }
+            - { name: LATENCY_JITTER_MS, value: "20" }
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - name: POD_NAMESPACE
+              valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+            - name: NODE_NAME
+              valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
+          readinessProbe: { httpGet: { path: /readyz, port: http }, initialDelaySeconds: 2, periodSeconds: 5 }
+          livenessProbe: { httpGet: { path: /healthz, port: http }, initialDelaySeconds: 5, periodSeconds: 10 }
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 64Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: service-b
+  namespace: demo
+  labels:
+    app.kubernetes.io/name: service-b
+    app.kubernetes.io/part-of: kubetraffic-demo
+spec:
+  selector:
+    app.kubernetes.io/name: service-b
+  ports: [{ name: http, port: 8080, targetPort: http }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: service-c
+  namespace: demo
+  labels: &c-labels
+    app.kubernetes.io/name: service-c
+    app.kubernetes.io/version: v1
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: kubetraffic-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: service-c
+  template:
+    metadata:
+      labels: *c-labels
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: app
+          image: kubetraffic/sample-app:dev
+          imagePullPolicy: IfNotPresent
+          ports: [{ name: http, containerPort: 8080 }]
+          env:
+            - { name: APP_NAME, value: service-c }
+            - { name: APP_VERSION, value: v1 }
+            - { name: LATENCY_MS, value: "25" }
+            - { name: LATENCY_JITTER_MS, value: "40" }
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - name: POD_NAMESPACE
+              valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+            - name: NODE_NAME
+              valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
+          readinessProbe: { httpGet: { path: /readyz, port: http }, initialDelaySeconds: 2, periodSeconds: 5 }
+          livenessProbe: { httpGet: { path: /healthz, port: http }, initialDelaySeconds: 5, periodSeconds: 10 }
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 64Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: service-c
+  namespace: demo
+  labels:
+    app.kubernetes.io/name: service-c
+    app.kubernetes.io/part-of: kubetraffic-demo
+spec:
+  selector:
+    app.kubernetes.io/name: service-c
+  ports: [{ name: http, port: 8080, targetPort: http }]

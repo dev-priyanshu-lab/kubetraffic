@@ -1,0 +1,22 @@
+# INVALID (semantic): each weight is individually in range, so the CRD schema
+# accepts this. The validating webhook rejects it because 90 + 30 != 100.
+# Until the webhook is deployed (Phase 3) this applies successfully; the
+# reconciler also runs ValidateTrafficRoute as a backstop and marks the object
+# phase=Invalid.
+apiVersion: traffic.kubetraffic.io/v1alpha1
+kind: TrafficRoute
+metadata:
+  name: invalid-weight-sum
+  namespace: demo
+spec:
+  host: api.example.com
+  routes:
+    - path: /payment
+      backend:
+        service: payment
+        port: 8080
+      versions:
+        - name: v1
+          weight: 90
+        - name: v2
+          weight: 30

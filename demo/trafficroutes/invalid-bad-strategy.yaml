@@ -1,0 +1,19 @@
+# INVALID: strategy.type must be one of WEIGHTED, CANARY, BLUE_GREEN.
+# Rejected by the CRD schema enum.
+apiVersion: traffic.kubetraffic.io/v1alpha1
+kind: TrafficRoute
+metadata:
+  name: invalid-bad-strategy
+  namespace: demo
+spec:
+  host: api.example.com
+  routes:
+    - path: /payment
+      backend:
+        service: payment
+        port: 8080
+      versions:
+        - name: v1
+          weight: 100
+      strategy:
+        type: ROLLING

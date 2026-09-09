@@ -1,0 +1,13 @@
+# INVALID: spec.host is required by the CRD schema. `kubectl apply` is rejected
+# by the API server before the object is ever stored.
+apiVersion: traffic.kubetraffic.io/v1alpha1
+kind: TrafficRoute
+metadata:
+  name: invalid-missing-host
+  namespace: demo
+spec:
+  routes:
+    - path: /payment
+      backend:
+        service: payment
+        port: 8080

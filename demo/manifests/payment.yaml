@@ -1,0 +1,199 @@
+# The "payment" service has two versions running side by side. Later phases split
+# traffic between them via a TrafficRoute; for Phase 1 both are directly reachable.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-v1
+  namespace: demo
+  labels:
+    app.kubernetes.io/name: payment
+    app.kubernetes.io/version: v1
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: kubetraffic-demo
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: payment
+      app.kubernetes.io/version: v1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: payment
+        app.kubernetes.io/version: v1
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: kubetraffic-demo
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          image: kubetraffic/sample-app:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: APP_NAME
+              value: payment
+            - name: APP_VERSION
+              value: v1
+            - name: ERROR_RATE
+              value: "0.0"
+            - name: LATENCY_MS
+              value: "10"
+            - name: LATENCY_JITTER_MS
+              value: "10"
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - name: POD_NAMESPACE
+              valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+            - name: NODE_NAME
+              valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 64Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-v2
+  namespace: demo
+  labels:
+    app.kubernetes.io/name: payment
+    app.kubernetes.io/version: v2
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: kubetraffic-demo
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: payment
+      app.kubernetes.io/version: v2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: payment
+        app.kubernetes.io/version: v2
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: kubetraffic-demo
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          image: kubetraffic/sample-app:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: APP_NAME
+              value: payment
+            - name: APP_VERSION
+              value: v2
+            # Raise ERROR_RATE / LATENCY_MS here to drive the canary-rollback demo later.
+            - name: ERROR_RATE
+              value: "0.0"
+            - name: LATENCY_MS
+              value: "20"
+            - name: LATENCY_JITTER_MS
+              value: "15"
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - name: POD_NAMESPACE
+              valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+            - name: NODE_NAME
+              valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 64Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+# Umbrella Service: selects BOTH versions. This is what a TrafficRoute references.
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment
+  namespace: demo
+  labels:
+    app.kubernetes.io/name: payment
+    app.kubernetes.io/part-of: kubetraffic-demo
+spec:
+  selector:
+    app.kubernetes.io/name: payment
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+# Per-version Services for direct testing / debugging.
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-v1
+  namespace: demo
+  labels:
+    app.kubernetes.io/name: payment
+    app.kubernetes.io/version: v1
+    app.kubernetes.io/part-of: kubetraffic-demo
+spec:
+  selector:
+    app.kubernetes.io/name: payment
+    app.kubernetes.io/version: v1
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-v2
+  namespace: demo
+  labels:
+    app.kubernetes.io/name: payment
+    app.kubernetes.io/version: v2
+    app.kubernetes.io/part-of: kubetraffic-demo
+spec:
+  selector:
+    app.kubernetes.io/name: payment
+    app.kubernetes.io/version: v2
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

@@ -1,0 +1,34 @@
+# Valid: automatic canary that walks v2 up the ladder while health stays good.
+apiVersion: traffic.kubetraffic.io/v1alpha1
+kind: TrafficRoute
+metadata:
+  name: payment-canary
+  namespace: demo
+spec:
+  host: api.example.com
+  routes:
+    - path: /payment
+      backend:
+        service: payment
+        port: 8080
+      versions:
+        - name: v1
+          weight: 100
+        - name: v2
+          weight: 0
+      strategy:
+        type: CANARY
+        canary:
+          steps: [5, 10, 25, 50, 100]
+          stepInterval: 2m
+          maxWeight: 100
+      resilience:
+        timeout: 2s
+        circuitBreaker:
+          enabled: true
+          failureThreshold: 5
+      health:
+        errorRateThreshold: 5
+        latencyThreshold: 400ms
+        minRequests: 30
+        stabilizationWindow: 1m
