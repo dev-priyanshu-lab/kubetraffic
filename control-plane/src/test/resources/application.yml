@@ -1,0 +1,6 @@
+# Test overrides: share the actuator endpoints on the app port so integration
+# tests can reach /actuator/** without a second random port. The datasource is
+# supplied by Testcontainers @ServiceConnection.
+management:
+  server:
+    port:

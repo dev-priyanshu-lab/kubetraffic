@@ -113,3 +113,32 @@ proxy-verify: ## Run Phase 5 acceptance checks (HAProxy programming + traffic sp
 .PHONY: weighted-verify
 weighted-verify: ## Run Phase 6 acceptance checks (dynamic weight re-split)
 	hack/verify-phase6.sh
+
+## --- control plane (Java) ----------------------------------------------
+
+JAVA21 := $(shell /usr/libexec/java_home -v 21 2>/dev/null)
+
+.PHONY: control-plane-test
+control-plane-test: ## Unit-test the control plane (ITs need Docker + `mvn verify`)
+	cd control-plane && JAVA_HOME=$(JAVA21) mvn -B -q test
+
+.PHONY: control-plane-verify-full
+control-plane-verify-full: ## Full mvn verify incl. Testcontainers ITs
+	cd control-plane && JAVA_HOME=$(JAVA21) DOCKER_HOST=unix://$(HOME)/.docker/run/docker.sock mvn -B verify
+
+.PHONY: control-plane-image
+control-plane-image: ## Build + load the control-plane image into kind
+	docker build --provenance=false -t kubetraffic/control-plane:dev control-plane
+	kind load docker-image kubetraffic/control-plane:dev --name kubetraffic
+
+.PHONY: control-plane-deploy
+control-plane-deploy: control-plane-image ## Deploy PostgreSQL + control plane
+	kubectl apply -k deployments/control-plane
+
+.PHONY: control-plane-undeploy
+control-plane-undeploy: ## Remove PostgreSQL + control plane
+	kubectl delete -k deployments/control-plane --ignore-not-found
+
+.PHONY: control-plane-e2e-verify
+control-plane-e2e-verify: ## Run Phase 7 acceptance checks
+	hack/verify-phase7.sh

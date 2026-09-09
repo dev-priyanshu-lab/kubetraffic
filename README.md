@@ -522,3 +522,82 @@ ALL PHASE 6 CHECKS PASSED
 - [ ] The HAProxy pod name is unchanged across the re-split (hitless reload, not a restart).
 
 Then say **"start phase 7"** (Java Spring Boot control plane: modules, REST skeleton, PostgreSQL + Flyway, health/readiness).
+
+---
+
+## Phase 7 — Java control plane
+
+### What this phase delivers
+
+* `control-plane/` — a Spring Boot 3.3 / Java 21 service (Maven), packages
+  `persistence` (JPA entities + repos), `policy` (service, DTOs, versioning),
+  `audit` (append-only trail), `api` (REST + `ProblemDetail` error handling).
+* **PostgreSQL 16** (in-cluster `StatefulSet`, official `postgres:16-alpine`
+  running as uid 70 under PodSecurity `restricted`) + **Flyway** migration
+  `V1__init.sql` (`policy`, `config_version`, `audit_log`). `ddl-auto=validate`.
+* REST API: `POST/GET/PUT/DELETE /api/v1/policies/{name}` (with `?namespace=`),
+  `GET /api/v1/audit?target=&limit=`. Every mutation writes a `config_version`
+  row and an audit entry in one transaction; `PUT` bumps `generation` only when
+  the spec actually changes.
+* Actuator health/liveness/readiness on `:8081`, Prometheus at
+  `/actuator/prometheus`. 2 replicas, pod anti-affinity, graceful shutdown, a
+  `wait-for-postgres` init container.
+* Tests: `PolicyServiceTest` (Mockito unit — create/get/update/delete/conflict/
+  not-found/no-op), `PolicyApiIT` + `AbstractPostgresIT` (Testcontainers
+  `@ServiceConnection`, full lifecycle + 404 + 400 + actuator).
+
+### Environment notes
+
+* Local `mvn` must run on **Java 21** (`JAVA_HOME=$(/usr/libexec/java_home -v 21)`) —
+  Mockito's inline mock maker breaks on newer JDKs. The Makefile targets set this.
+* **Testcontainers ITs need a Docker daemon that speaks API ≤ the pinned
+  version.** Docker Engine 29 (which this machine runs) dropped API < 1.44, and
+  the bundled docker-java pins 1.43, so `mvn verify` ITs fail *locally* with
+  "Could not find a valid Docker environment". They run in CI (Phase 18). The
+  Phase 7 gate therefore uses unit tests + a live in-cluster PostgreSQL check.
+
+### Commands
+
+```sh
+make control-plane-test            # unit tests (Java 21)
+make control-plane-verify-full     # mvn verify incl. Testcontainers ITs (needs compatible Docker)
+make control-plane-deploy          # build image -> kind load -> kubectl apply -k deployments/control-plane
+make control-plane-e2e-verify      # Phase 7 acceptance checks
+```
+
+### Expected output — verified here
+
+```
+$ make control-plane-e2e-verify
+PASS: control-plane unit tests
+PASS: postgres ready
+PASS: control-plane ready (2/2)
+PASS: Flyway migrated schema (1 migration(s))
+PASS: /actuator/health UP
+PASS: POST /api/v1/policies -> 201
+PASS: duplicate -> 409
+PASS: PUT with changed spec -> generation 2
+PASS: audit log has N entries for the target
+PASS: policy persisted across control-plane pod restart
+ALL PHASE 7 CHECKS PASSED
+```
+
+### Failure scenarios to try
+
+| Action | Expected |
+|---|---|
+| `kubectl -n kubetraffic-system delete pod kubetraffic-postgres-0` | control-plane readiness flips to DOWN (DB unreachable) → pods `NotReady`; Postgres restarts from its PVC; data intact; readiness recovers |
+| `POST` a policy with a blank `name` | `400` `ProblemDetail` listing the field error |
+| `PUT` with the same spec (reformatted) | `200`, `generation` unchanged, no new `config_version` row, no audit entry |
+| `GET /api/v1/policies/does-not-exist` | `404` `ProblemDetail` |
+| roll both control-plane replicas | stateless — API stays available on the other replica throughout |
+
+### Verify before Phase 8
+
+- [ ] `make control-plane-test` passes (10 unit tests).
+- [ ] `make control-plane-deploy` → `kubetraffic-postgres-0` `1/1`, `kubetraffic-control-plane` `2/2`.
+- [ ] `flyway_schema_history` has a successful row; `policy` / `config_version` / `audit_log` tables exist.
+- [ ] `POST` → `201`, duplicate → `409`, `PUT` bumps `generation`, `DELETE` → `204`, audit reflects the actions.
+- [ ] Deleting a control-plane pod does not lose the stored policy.
+
+Then say **"start phase 8"** (gRPC between the Go controller and the Java control plane: `.proto` contract, `RegisterRoute` / `GetRouteConfig` / `StreamDecisions`, the controller consumes control-plane weights).
