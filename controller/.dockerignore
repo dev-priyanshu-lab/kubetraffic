@@ -1,0 +1,5 @@
+bin/
+config/
+*.md
+Dockerfile
+.dockerignore

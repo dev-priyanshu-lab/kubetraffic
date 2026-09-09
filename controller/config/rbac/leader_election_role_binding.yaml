@@ -1,0 +1,16 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kubetraffic-controller-leader-election
+  namespace: kubetraffic-system
+  labels:
+    app.kubernetes.io/name: kubetraffic
+    app.kubernetes.io/component: controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kubetraffic-controller-leader-election
+subjects:
+  - kind: ServiceAccount
+    name: kubetraffic-controller
+    namespace: kubetraffic-system

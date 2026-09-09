@@ -75,3 +75,19 @@ crd-install: ## Install the TrafficRoute CRD into the current kube context
 .PHONY: crd-uninstall
 crd-uninstall: ## Remove the TrafficRoute CRD
 	$(MAKE) -C controller uninstall
+
+.PHONY: controller-run
+controller-run: ## Run the controller locally against the current kube context
+	$(MAKE) -C controller run
+
+.PHONY: controller-deploy
+controller-deploy: ## Build+load the image and deploy the controller to kind
+	$(MAKE) -C controller kind-load deploy
+
+.PHONY: controller-undeploy
+controller-undeploy: ## Remove the controller from the cluster
+	$(MAKE) -C controller undeploy
+
+.PHONY: controller-verify
+controller-verify: ## Run Phase 3 acceptance checks
+	hack/verify-phase3.sh

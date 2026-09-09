@@ -229,3 +229,90 @@ the webhook rejects it once deployed in Phase 3.
 - [ ] `kubectl -n demo get tr` shows the `HOST` / `PHASE` / `AGE` print columns.
 
 Then say **"start phase 3"** (Go controller skeleton: manager, informers, workqueue, no-op reconcile, leader election, `/metrics`).
+
+---
+
+## Phase 3 — Go controller skeleton
+
+### What this phase delivers
+
+* A controller-runtime **manager** (`controller/cmd/manager/`) — scheme
+  registration, plain-HTTP metrics server, `/healthz` + `/readyz` probes, leader
+  election (`--leader-elect`), informer resync period, structured `zap` logging,
+  signal-driven graceful shutdown that releases the lease.
+* A `TrafficRouteReconciler` (`controller/internal/controller/`) that watches
+  `TrafficRoute` (generation-changed predicate), runs the `ValidateTrafficRoute`
+  backstop, and maintains `status`: `phase`, `observedGeneration`, and the
+  `Accepted` / `Programmed` conditions. It is **idempotent** — a no-op reconcile
+  writes nothing. It does **not** resolve endpoints or program a proxy yet, so a
+  valid route settles at `phase=Pending`, `Programmed=False`.
+* Prometheus collectors (`controller/internal/metrics/`):
+  `traffic_controller_reconcile_total`, `..._errors_total`,
+  `..._duration_seconds`, registered on the controller-runtime registry.
+* Generated RBAC (`config/rbac/role.yaml`) + static ServiceAccount, bindings and
+  a namespaced leader-election Role.
+* Install kustomize (`config/default` = crd + rbac + manager), a 2-replica
+  Deployment with pod anti-affinity, and a metrics `Service`.
+
+### Commands
+
+```sh
+make -C controller test           # go build + unit tests (reconciler, metrics, webhook)
+make -C controller run            # run locally against the current kube context
+make controller-deploy            # docker build -> kind load -> kubectl apply -k config/default
+make controller-verify            # Phase 3 acceptance checks
+make controller-undeploy
+```
+
+### Expected output — verified here
+
+```
+$ make controller-verify
+PASS: controller build + unit tests
+PASS: controller deployment ready (2/2 replicas)
+PASS: leader lease held by kubetraffic-controller-577b5676d6-dnlj9_bd008070-...
+PASS: valid route: phase=Pending, observedGeneration=1, Accepted=True
+PASS: invalid route: phase=Invalid
+PASS: metrics exposed (leader reconcile_total=2, errors_total=0)
+ALL PHASE 3 CHECKS PASSED
+```
+
+`kubectl -n demo get tr payment-weighted -o jsonpath='{.status}'`:
+
+```json
+{
+  "phase": "Pending",
+  "observedGeneration": 1,
+  "conditions": [
+    { "type": "Accepted",   "status": "True",  "reason": "Valid" },
+    { "type": "Programmed",  "status": "False", "reason": "DiscoveryNotImplemented",
+      "message": "controller skeleton: endpoint discovery (Phase 4) and proxy programming (Phase 5) are not yet implemented" }
+  ]
+}
+```
+
+Leader pod `/metrics`: `traffic_controller_reconcile_total 5`,
+`traffic_controller_reconcile_errors_total 0`,
+`traffic_controller_reconcile_duration_seconds_count 5`.
+
+### Failure scenarios to try
+
+| Action | Expected |
+|---|---|
+| `kubectl -n kubetraffic-system delete pod <leader-pod>` | standby acquires the Lease within ~15 s; `kubectl -n kubetraffic-system get lease kubetraffic-controller -o jsonpath='{.spec.holderIdentity}'` shows the new holder; no error events |
+| `kubectl -n demo edit tr payment-weighted` → break weights to sum 130 | `phase` flips to `Invalid`, `Accepted=False reason=SpecInvalid`, a `Warning/SpecInvalid` event; last good config is retained (nothing else changes) |
+| fix the weights again | `phase` returns to `Pending`, `Accepted=True` |
+| `kubectl -n demo delete tr payment-weighted` | reconcile returns cleanly (`IgnoreNotFound`); no requeue, no error metric |
+| scale the Deployment to 1, then back to 2 | single active reconciler throughout; `reconcile_errors_total` stays 0 |
+
+### Verify before Phase 4
+
+- [ ] `make -C controller test` passes (reconciler + metrics + webhook suites).
+- [ ] `make controller-deploy` → `kubectl -n kubetraffic-system get deploy` shows `2/2` ready.
+- [ ] `kubectl -n kubetraffic-system get lease kubetraffic-controller` has a non-empty `holderIdentity`.
+- [ ] Applying `demo/trafficroutes/payment-weighted.yaml` sets `status.phase=Pending`, `observedGeneration == metadata.generation`, `Accepted=True`, `Programmed=False`.
+- [ ] Applying `demo/trafficroutes/invalid-weight-sum.yaml` sets `status.phase=Invalid` (reconciler backstop, webhook not yet deployed).
+- [ ] Leader pod `/metrics` exposes `traffic_controller_reconcile_total` > 0 and `..._errors_total == 0`.
+- [ ] Deleting the leader pod triggers failover with no traffic to any data plane (there is none yet) and no error events.
+
+Then say **"start phase 4"** (Service + EndpointSlice discovery → resolved endpoints in status).

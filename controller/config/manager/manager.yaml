@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubetraffic-controller
+  namespace: kubetraffic-system
+  labels:
+    app.kubernetes.io/name: kubetraffic
+    app.kubernetes.io/component: controller
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kubetraffic
+      app.kubernetes.io/component: controller
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kubetraffic
+        app.kubernetes.io/component: controller
+    spec:
+      serviceAccountName: kubetraffic-controller
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: kubetraffic
+                    app.kubernetes.io/component: controller
+      containers:
+        - name: manager
+          image: kubetraffic/controller:dev
+          imagePullPolicy: IfNotPresent
+          args:
+            - --leader-elect
+            - --leader-election-id=kubetraffic-controller
+            - --health-probe-bind-address=:8081
+            - --metrics-bind-address=:8080
+            - --resync-interval=10m
+          ports:
+            - name: metrics
+              containerPort: 8080
+            - name: probes
+              containerPort: 8081
+          livenessProbe:
+            httpGet: { path: /healthz, port: probes }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet: { path: /readyz, port: probes }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 500m, memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

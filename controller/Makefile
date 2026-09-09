@@ -4,6 +4,9 @@ LOCALBIN := $(shell pwd)/bin
 CONTROLLER_GEN := $(LOCALBIN)/controller-gen
 CONTROLLER_TOOLS_VERSION ?= v0.16.5
 
+IMG ?= kubetraffic/controller:dev
+KIND_CLUSTER ?= kubetraffic
+
 $(LOCALBIN):
 	mkdir -p $(LOCALBIN)
 
@@ -23,9 +26,10 @@ generate: controller-gen ## Generate DeepCopy methods (zz_generated.deepcopy.go)
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./api/..."
 
 .PHONY: manifests
-manifests: controller-gen ## Generate CRD + webhook manifests
-	$(CONTROLLER_GEN) crd webhook paths="./..." \
+manifests: controller-gen ## Generate CRD + RBAC + webhook manifests
+	$(CONTROLLER_GEN) rbac:roleName=kubetraffic-controller crd webhook paths="./..." \
 	  output:crd:artifacts:config=config/crd/bases \
+	  output:rbac:artifacts:config=config/rbac \
 	  output:webhook:artifacts:config=config/webhook
 
 .PHONY: vet
@@ -47,3 +51,24 @@ install: manifests ## Apply the CRD to the current kube context
 .PHONY: uninstall
 uninstall: ## Remove the CRD from the current kube context
 	kubectl delete -f config/crd/bases --ignore-not-found
+
+.PHONY: run
+run: generate manifests ## Run the manager locally against the current kube context
+	go run ./cmd/manager --leader-elect=false --resync-interval=1m --zap-devel
+
+.PHONY: docker-build
+docker-build: ## Build the controller container image
+	docker build --provenance=false -t $(IMG) .
+
+.PHONY: kind-load
+kind-load: docker-build ## Build + load the controller image into the kind cluster
+	kind load docker-image $(IMG) --name $(KIND_CLUSTER)
+
+.PHONY: deploy
+deploy: manifests ## Deploy CRD + RBAC + manager to the current kube context
+	kubectl apply -k config/default
+	kubectl -n kubetraffic-system rollout restart deploy/kubetraffic-controller 2>/dev/null || true
+
+.PHONY: undeploy
+undeploy: ## Remove the controller install
+	kubectl delete -k config/default --ignore-not-found
