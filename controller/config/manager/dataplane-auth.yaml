@@ -1,0 +1,11 @@
+# DEV ONLY (see deployments/haproxy/dataplane-auth.yaml). The controller mounts
+# this to authenticate to the HAProxy Data Plane API. Phase 15 replaces it.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kubetraffic-dataplane-auth
+  namespace: kubetraffic-system
+type: Opaque
+stringData:
+  username: admin
+  password: kubetraffic-dev-not-secret

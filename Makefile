@@ -91,3 +91,25 @@ controller-undeploy: ## Remove the controller from the cluster
 .PHONY: controller-verify
 controller-verify: ## Run Phase 3 acceptance checks
 	hack/verify-phase3.sh
+
+.PHONY: discovery-verify
+discovery-verify: ## Run Phase 4 acceptance checks (endpoint discovery)
+	hack/verify-phase4.sh
+
+## --- data plane (HAProxy) ------------------------------------------------
+
+.PHONY: haproxy-deploy
+haproxy-deploy: ## Deploy the HAProxy data plane
+	kubectl apply -k deployments/haproxy
+
+.PHONY: haproxy-undeploy
+haproxy-undeploy: ## Remove the HAProxy data plane
+	kubectl delete -k deployments/haproxy --ignore-not-found
+
+.PHONY: proxy-verify
+proxy-verify: ## Run Phase 5 acceptance checks (HAProxy programming + traffic split)
+	hack/verify-phase5.sh
+
+.PHONY: weighted-verify
+weighted-verify: ## Run Phase 6 acceptance checks (dynamic weight re-split)
+	hack/verify-phase6.sh

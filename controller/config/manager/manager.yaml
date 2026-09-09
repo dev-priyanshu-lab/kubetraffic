@@ -46,6 +46,13 @@ spec:
             - --health-probe-bind-address=:8081
             - --metrics-bind-address=:8080
             - --resync-interval=10m
+            - --haproxy-dataplane-url=http://kubetraffic-dataplane.kubetraffic-data.svc:5555
+            - --haproxy-dataplane-username=admin
+            - --haproxy-dataplane-password-file=/etc/kubetraffic/dataplane/password
+          volumeMounts:
+            - name: dataplane-auth
+              mountPath: /etc/kubetraffic/dataplane
+              readOnly: true
           ports:
             - name: metrics
               containerPort: 8080
@@ -67,3 +74,7 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+      volumes:
+        - name: dataplane-auth
+          secret:
+            secretName: kubetraffic-dataplane-auth

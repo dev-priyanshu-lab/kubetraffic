@@ -316,3 +316,209 @@ Leader pod `/metrics`: `traffic_controller_reconcile_total 5`,
 - [ ] Deleting the leader pod triggers failover with no traffic to any data plane (there is none yet) and no error events.
 
 Then say **"start phase 4"** (Service + EndpointSlice discovery → resolved endpoints in status).
+
+---
+
+## Phase 4 — Service + EndpointSlice discovery
+
+### What this phase delivers
+
+* `controller/internal/discovery` — a `Resolver` that turns a `RouteRule` into
+  ready endpoints grouped by version: **Service** (validate the referenced port)
+  → its **EndpointSlices** → each endpoint's target **Pod** (read from the
+  informer cache) → the pod's version label → a per-version bucket. Endpoints
+  that match no declared version are counted as `Unmatched`.
+* The reconciler now records `status.routes[]` — `path`, `backend`,
+  `resolvedEndpoints[] {version, ready, total, addresses}`, and
+  `currentWeights[]` (still mirrored from the spec; dynamic in Phase 8).
+* A new `Resolved` condition and a `Degraded` phase: a missing backend Service,
+  a missing port, or any declared version with zero ready endpoints →
+  `phase=Degraded`, `Resolved=False`, `Warning/EndpointsUnavailable` event.
+  Fully resolved → `phase=Pending`, `Resolved=True` (still `Programmed=False`).
+* **Secondary watches** with fan-out mapping: a field index on
+  `.spec.routes.backend.service` routes `Service` and `EndpointSlice` events only
+  to the owning `TrafficRoute`s; `Pod` events (filtered to readiness / IP
+  changes) enqueue every route in the pod's namespace.
+
+### Commands
+
+```sh
+make -C controller test        # discovery + reconciler unit tests
+make controller-deploy         # rebuild + reload + redeploy
+make discovery-verify          # Phase 4 acceptance checks (incl. scale reactions)
+```
+
+### Expected output — verified here
+
+```
+$ make discovery-verify
+PASS: phase (Pending)
+PASS: Resolved condition (True)
+PASS: resolvedEndpoints: v1=2/2, v2=2/2
+PASS: status ready total (4) matches EndpointSlices (4)
+PASS: currentWeights: v1=90, v2=10
+PASS: phase after scale-to-zero (Degraded)
+PASS: v2 ready after scale-to-zero (0)
+PASS: phase after recovery (Pending)
+PASS: v2 ready after recovery (2)
+ALL PHASE 4 CHECKS PASSED
+```
+
+`kubectl -n demo get tr payment-weighted -o json | jq .status.routes[0]`:
+
+```json
+{
+  "path": "/payment",
+  "backend": "payment:8080",
+  "resolvedEndpoints": [
+    { "version": "v1", "ready": 2, "total": 2, "addresses": ["10.244.1.11", "10.244.2.7"] },
+    { "version": "v2", "ready": 2, "total": 2, "addresses": ["10.244.1.16", "10.244.2.17"] }
+  ],
+  "currentWeights": [ { "version": "v1", "weight": 90 }, { "version": "v2", "weight": 10 } ]
+}
+```
+
+### Failure scenarios to try
+
+| Action | Expected |
+|---|---|
+| `kubectl -n demo scale deploy/payment-v2 --replicas=0` | `phase=Degraded`, `Resolved=False`, `resolvedEndpoints` for `v2` shows `ready: 0`; scale back → recovers within one reconcile |
+| `kubectl -n demo delete pod -l app.kubernetes.io/version=v1` | brief dip in `v1.ready`/`addresses` while pods restart, then back to 2 (Pod watch drives the requeue) |
+| point a route at a non-existent Service | `phase=Degraded`, `Resolved` message contains `backend Service "…" not found` |
+| set `spec.routes[0].backend.port` to a port the Service doesn't expose | `Resolved` message contains `port … not found on Service` |
+| add a pod with `app.kubernetes.io/version=v3` (not declared) behind `svc/payment` | its ready endpoint is reported via `… ready endpoint(s) match no declared version` |
+
+### Verify before Phase 5
+
+- [ ] `make -C controller test` passes (`discovery` + `controller` suites).
+- [ ] `make discovery-verify` prints `ALL PHASE 4 CHECKS PASSED`.
+- [ ] `status.routes[].resolvedEndpoints` ready total equals the `ready==true` endpoint count from `kubectl -n demo get endpointslices -l kubernetes.io/service-name=payment`.
+- [ ] Scaling a version to 0 flips `phase` to `Degraded`; scaling back returns it to `Pending` without editing the `TrafficRoute`.
+- [ ] `currentWeights` mirror the spec weights.
+
+Then say **"start phase 5"** (HAProxy integration: `Proxy` interface + Data Plane API implementation; render + validate + apply config; `Programmed` finally goes True).
+
+---
+
+## Phase 5 — HAProxy data plane
+
+### What this phase delivers
+
+* `internal/model` — the proxy-agnostic **RoutingModel** (`Host` → `Rule`s →
+  weighted `Server`s), built from spec + discovery. Per-version weight is split
+  evenly across that version's ready endpoints so the aggregate stays
+  proportional regardless of replica count.
+* `internal/proxy` — the `Proxy` interface (`GenerateConfig` / `ValidateConfig` /
+  `ApplyConfig`), a text/template **Renderer** for HAProxy, a **Data Plane API**
+  client using the raw-config endpoint (GET version → compare → POST full file →
+  hitless reload; no-op when the live config already matches), and a `Fake` for
+  tests.
+* Reconciler: after discovery it builds the model, renders, and applies. Success
+  → `Programmed=True`, `phase=Ready`, `Programmed` event with the config hash. A
+  proxy error → `phase=Degraded`, `Programmed=False`, the error is returned so
+  the item is retried. `--haproxy-dataplane-url` unset → `ProxyNotConfigured`
+  (Phase 4 behaviour).
+* `deployments/haproxy/` — `haproxytech/haproxy-alpine:3.0` in master-worker mode
+  with the Data Plane API as a `program`; bootstrap config in a ConfigMap
+  (copied to a writable emptyDir by an init container), `kubetraffic-dataplane`
+  (`:5555`/`:8404`) and `kubetraffic-gateway` (NodePort 30080 → host `:8080`)
+  Services. Dev-only shared credential (`kubetraffic-dev-not-secret`) — Phase 15
+  replaces it with TLS + a generated Secret.
+
+### Commands
+
+```sh
+make -C controller test
+make haproxy-deploy
+make controller-deploy       # now passes --haproxy-dataplane-url
+make proxy-verify
+cd controller && go run ./hack/genconfig   # print the bootstrap config the renderer expects
+```
+
+### Expected output — verified here
+
+```
+$ make proxy-verify
+PASS: haproxy deployment ready
+PASS: controller redeployed
+PASS: phase=Ready, Programmed=True
+PASS: Data Plane API backend present
+    v1=270 v2=30 other=0 (of 300)
+PASS: weighted split ~90/10 (v1=270, v2=30)
+PASS: unknown host -> 503 (kubetraffic_no_route)
+ALL PHASE 5 CHECKS PASSED
+```
+
+`curl -H 'Host: api.example.com' http://localhost:8080/payment` (via `kubectl -n kubetraffic-data port-forward svc/kubetraffic-gateway 8080:80`) returns `{"version":"v1"}` ~90% of the time, `{"version":"v2"}` ~10%.
+
+### Failure scenarios to try
+
+| Action | Expected |
+|---|---|
+| `kubectl -n kubetraffic-data delete pod -l app.kubernetes.io/component=data-plane` | HAProxy restarts from the bootstrap ConfigMap; controller detects the config drift on next reconcile and re-pushes; brief connection resets only |
+| point a route at a Service with an invalid config (e.g. duplicate backend name via two routes with same host+path) | validation rejects it earlier; a genuine `haproxy -c` failure → `Programmed=False reason=ProxyError`, event, retry with backoff, last good config stays live |
+| `kubectl -n demo scale deploy/payment-v2 --replicas=0` | route goes `Degraded`; controller stops pushing (last good config retained); HAProxy `check` also drains the dead servers |
+| `curl -H 'Host: unknown' .../payment` | `503` from `kubetraffic_no_route` |
+
+### Verify before Phase 6
+
+- [ ] `make -C controller test` passes (`model`, `proxy`, `controller` suites).
+- [ ] `make haproxy-deploy` → `kubetraffic-haproxy` pod `1/1 Ready`.
+- [ ] `make proxy-verify` prints `ALL PHASE 5 CHECKS PASSED`.
+- [ ] A `TrafficRoute` reaches `phase=Ready` / `Programmed=True`.
+- [ ] `GET /v3/services/haproxy/configuration/backends` on the Data Plane API lists a `kt_be_*` backend.
+- [ ] Traffic through `kubetraffic-gateway` splits ≈ to the spec weights; unknown host → `503`.
+
+Then say **"start phase 6"** (weighted routing: dynamic weight changes re-program the data plane; exact weight apportionment).
+
+---
+
+## Phase 6 — Weighted routing
+
+### What this phase delivers
+
+* Exact weight **apportionment** (`internal/model`): a version's weight is split
+  across its ready endpoints with largest-remainder rounding so the per-server
+  weights sum exactly to the spec weight. `weight: 0` parks a version's servers
+  (up + health-checked, zero traffic — the canary-at-0 state); `weight > 0`
+  guarantees every ready pod gets ≥ 1.
+* Confirmation that a `kubectl apply` that only changes weights bumps
+  `.metadata.generation`, re-reconciles, re-renders, and the Data Plane API
+  performs a **hitless reload** — `status.routes[].currentWeights` and the live
+  traffic split both follow, with no HAProxy restart.
+
+### Commands
+
+```sh
+make -C controller test        # + apportionment tests
+make weighted-verify           # 90/10 -> edit -> 50/50, assert re-split + same HAProxy pod
+```
+
+### Expected output — verified here
+
+```
+$ make weighted-verify
+    90/10 -> v1=270 v2=30 other=0
+PASS: status currentWeights updated to 50/50
+    50/50 -> v1=200 v2=200 other=0
+PASS: traffic re-split to ~50/50 (v1=200, v2=200)
+PASS: HAProxy pod unchanged: re-program was a hitless reload
+ALL PHASE 6 CHECKS PASSED
+```
+
+### Failure scenarios to try
+
+| Action | Expected |
+|---|---|
+| set weights to `1 / 99` with 3 replicas on the `1` side | every pod still gets `weight 1`; the `1`-side aggregate is slightly inflated (documented trade-off) — no pod is parked |
+| set a version to `weight: 0` | its `server` lines render `weight 0`; `curl` never hits that version; the pods stay `check`ed and ready |
+| rapid successive weight edits | each generation reconciles; `ApplyConfig` skips when the rendered config already matches the live one (no redundant reload) |
+
+### Verify before Phase 7
+
+- [ ] `make -C controller test` passes (`apportion` sums exactly; `0` parks; tiny weight keeps every server ≥ 1).
+- [ ] `make weighted-verify` prints `ALL PHASE 6 CHECKS PASSED`.
+- [ ] Editing weights advances `.metadata.generation` and updates `status.routes[].currentWeights`.
+- [ ] The HAProxy pod name is unchanged across the re-split (hitless reload, not a restart).
+
+Then say **"start phase 7"** (Java Spring Boot control plane: modules, REST skeleton, PostgreSQL + Flyway, health/readiness).

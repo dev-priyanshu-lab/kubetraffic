@@ -9,6 +9,7 @@ package main
 import (
 	"flag"
 	"os"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -22,6 +23,7 @@ import (
 
 	trafficv1alpha1 "github.com/kubetraffic/controller/api/v1alpha1"
 	"github.com/kubetraffic/controller/internal/controller"
+	"github.com/kubetraffic/controller/internal/proxy"
 )
 
 var (
@@ -36,12 +38,15 @@ func init() {
 
 func main() {
 	var (
-		metricsAddr          string
-		probeAddr            string
-		enableLeaderElection bool
-		leaderElectionID     string
-		resyncInterval       time.Duration
-		cacheSyncPeriod      time.Duration
+		metricsAddr           string
+		probeAddr             string
+		enableLeaderElection  bool
+		leaderElectionID      string
+		resyncInterval        time.Duration
+		cacheSyncPeriod       time.Duration
+		dataplaneURL          string
+		dataplaneUsername     string
+		dataplanePasswordFile string
 	)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "Address the metrics endpoint binds to; '0' disables it.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "Address the health/readiness probe endpoint binds to.")
@@ -49,12 +54,32 @@ func main() {
 	flag.StringVar(&leaderElectionID, "leader-election-id", "kubetraffic-controller", "Name of the leader-election Lease.")
 	flag.DurationVar(&resyncInterval, "resync-interval", 10*time.Minute, "Per-TrafficRoute periodic reconcile interval.")
 	flag.DurationVar(&cacheSyncPeriod, "cache-sync-period", 30*time.Minute, "Informer full-resync period.")
+	flag.StringVar(&dataplaneURL, "haproxy-dataplane-url", "", "HAProxy Data Plane API root (e.g. http://host:5555). Empty disables data-plane programming.")
+	flag.StringVar(&dataplaneUsername, "haproxy-dataplane-username", "admin", "HAProxy Data Plane API username.")
+	flag.StringVar(&dataplanePasswordFile, "haproxy-dataplane-password-file", "", "Path to a file containing the Data Plane API password.")
 
 	zapOpts := zap.Options{Development: false}
 	zapOpts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&zapOpts)))
+
+	var dataPlane proxy.Proxy
+	if dataplaneURL != "" {
+		password, err := os.ReadFile(dataplanePasswordFile)
+		if err != nil {
+			setupLog.Error(err, "unable to read --haproxy-dataplane-password-file")
+			os.Exit(1)
+		}
+		dataPlane = proxy.NewHAProxy(proxy.HAProxyOptions{
+			BaseURL:  dataplaneURL,
+			Username: dataplaneUsername,
+			Password: strings.TrimSpace(string(password)),
+		})
+		setupLog.Info("data-plane programming enabled", "dataplaneURL", dataplaneURL)
+	} else {
+		setupLog.Info("data-plane programming disabled (no --haproxy-dataplane-url)")
+	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                        scheme,
@@ -75,6 +100,7 @@ func main() {
 		Scheme:         mgr.GetScheme(),
 		Recorder:       mgr.GetEventRecorderFor("trafficroute-controller"),
 		ResyncInterval: resyncInterval,
+		Proxy:          dataPlane,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "TrafficRoute")
 		os.Exit(1)

@@ -1,0 +1,56 @@
+# Bootstrap HAProxy config. HAProxy boots from this; the controller then owns the
+# file and replaces it wholesale via the Data Plane API raw endpoint.
+#
+# Keep haproxy.cfg in sync with the controller renderer:
+#   cd controller && go run ./hack/genconfig
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kubetraffic-haproxy-bootstrap
+  namespace: kubetraffic-data
+data:
+  haproxy.cfg: |
+    global
+        master-worker
+        log stdout format raw local0 info
+        stats socket /var/run/haproxy.sock mode 660 level admin expose-fd listeners
+        hard-stop-after 15s
+
+    userlist haproxy-dataplaneapi
+        user admin insecure-password kubetraffic-dev-not-secret
+
+    program api
+        command dataplaneapi --host 0.0.0.0 --port 5555 --haproxy-bin /usr/local/sbin/haproxy --config-file /usr/local/etc/haproxy/haproxy.cfg --reload-cmd /usr/local/etc/haproxy/reload.sh --restart-cmd /usr/local/etc/haproxy/restart.sh --reload-delay 5 --transaction-dir /tmp/haproxy --userlist haproxy-dataplaneapi --scheme http
+        no option start-on-reload
+
+    defaults
+        mode http
+        log global
+        option httplog
+        option dontlognull
+        retries 2
+        timeout connect 5s
+        timeout client 30s
+        timeout server 30s
+        timeout http-request 10s
+
+    frontend stats
+        bind :8404
+        http-request use-service prometheus-exporter if { path /metrics }
+        stats enable
+        stats uri /stats
+        stats refresh 10s
+
+    frontend kubetraffic
+        bind :8080
+        http-request set-var(txn.host) req.hdr(host),lower,field(1,:)
+        default_backend kubetraffic_no_route
+
+    backend kubetraffic_no_route
+        http-request return status 503 content-type "text/plain" string "kubetraffic: no route configured\n"
+  reload.sh: |
+    #!/bin/sh
+    exec kill -SIGUSR2 1
+  restart.sh: |
+    #!/bin/sh
+    exec kill -SIGTERM 1

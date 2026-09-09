@@ -1,0 +1,33 @@
+# Internal service: Data Plane API (controller -> :5555) and Prometheus stats (:8404).
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubetraffic-dataplane
+  namespace: kubetraffic-data
+  labels:
+    app.kubernetes.io/name: kubetraffic
+    app.kubernetes.io/component: data-plane
+spec:
+  selector:
+    app.kubernetes.io/name: kubetraffic
+    app.kubernetes.io/component: data-plane
+  ports:
+    - { name: dataplane, port: 5555, targetPort: dataplane }
+    - { name: stats, port: 8404, targetPort: stats }
+---
+# The data path. NodePort 30080 is mapped to host :8080 by deployments/kind/kind-cluster.yaml.
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubetraffic-gateway
+  namespace: kubetraffic-data
+  labels:
+    app.kubernetes.io/name: kubetraffic
+    app.kubernetes.io/component: data-plane
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: kubetraffic
+    app.kubernetes.io/component: data-plane
+  ports:
+    - { name: gateway, port: 80, targetPort: gateway, nodePort: 30080 }

@@ -1,0 +1,26 @@
+# Valid: even 50/50 split. Used to demonstrate that editing weights re-programs
+# the data plane with no restart.
+apiVersion: traffic.kubetraffic.io/v1alpha1
+kind: TrafficRoute
+metadata:
+  name: payment-weighted
+  namespace: demo
+spec:
+  host: api.example.com
+  routes:
+    - path: /payment
+      backend:
+        service: payment
+        port: 8080
+      versions:
+        - name: v1
+          weight: 50
+        - name: v2
+          weight: 50
+      strategy:
+        type: WEIGHTED
+      resilience:
+        timeout: 2s
+      health:
+        errorRateThreshold: 5
+        latencyThreshold: 500ms

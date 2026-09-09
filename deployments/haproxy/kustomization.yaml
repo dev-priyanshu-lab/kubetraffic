@@ -4,5 +4,6 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - dataplane-auth.yaml
-  - manager.yaml
-  - metrics_service.yaml
+  - configmap.yaml
+  - deployment.yaml
+  - service.yaml

@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubetraffic-haproxy
+  namespace: kubetraffic-data
+  labels:
+    app.kubernetes.io/name: kubetraffic
+    app.kubernetes.io/component: data-plane
+spec:
+  # Single replica in Phase 5: the controller pushes config to one Data Plane
+  # API. Multi-replica HA (fan-out push) is Phase 14.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kubetraffic
+      app.kubernetes.io/component: data-plane
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kubetraffic
+        app.kubernetes.io/component: data-plane
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 99
+        runAsGroup: 99
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: init-config
+          image: haproxytech/haproxy-alpine:3.0
+          command:
+            - sh
+            - -c
+            - |
+              cp /bootstrap/haproxy.cfg /etc/haproxy-live/haproxy.cfg
+              cp /bootstrap/reload.sh /bootstrap/restart.sh /etc/haproxy-live/
+              chmod +x /etc/haproxy-live/reload.sh /etc/haproxy-live/restart.sh
+          volumeMounts:
+            - { name: bootstrap, mountPath: /bootstrap }
+            - { name: config, mountPath: /etc/haproxy-live }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+      containers:
+        - name: haproxy
+          image: haproxytech/haproxy-alpine:3.0
+          command: ["haproxy", "-W", "-db", "-f", "/usr/local/etc/haproxy/haproxy.cfg"]
+          ports:
+            - { name: gateway, containerPort: 8080 }
+            - { name: dataplane, containerPort: 5555 }
+            - { name: stats, containerPort: 8404 }
+          readinessProbe:
+            httpGet: { path: /v3/info, port: dataplane, httpHeaders: [{ name: Authorization, value: "Basic YWRtaW46a3ViZXRyYWZmaWMtZGV2LW5vdC1zZWNyZXQ=" }] }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: gateway }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: "1", memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: config, mountPath: /usr/local/etc/haproxy }
+            - { name: run, mountPath: /var/run }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: bootstrap
+          configMap:
+            name: kubetraffic-haproxy-bootstrap
+        - name: config
+          emptyDir: {}
+        - name: run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}

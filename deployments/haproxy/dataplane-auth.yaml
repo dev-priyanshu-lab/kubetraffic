@@ -1,0 +1,15 @@
+# DEV ONLY. Phase 15 replaces this with a generated Secret + TLS on the Data
+# Plane API. The literal password here is duplicated in three places that MUST
+# stay in sync:
+#   - this Secret (consumed by HAProxy's userlist via the ConfigMap literal)
+#   - deployments/haproxy/configmap.yaml   (haproxy.cfg: insecure-password ...)
+#   - controller/config/manager/dataplane-auth.yaml  (mounted into the controller)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kubetraffic-dataplane-auth
+  namespace: kubetraffic-data
+type: Opaque
+stringData:
+  username: admin
+  password: kubetraffic-dev-not-secret
