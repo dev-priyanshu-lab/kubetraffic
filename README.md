@@ -690,3 +690,78 @@ conditions once fully up: `Accepted`, `Resolved`, `ControlPlaneRegistered`,
 - [ ] Deleting a `TrafficRoute` deletes its control-plane policy (finalizer-gated).
 
 Then say **"start phase 9"** (PostgreSQL is already in place from Phase 7 — this phase adds Redis for distributed rate-limit counters and shared circuit-breaker state across control-plane replicas).
+
+---
+
+## Phase 9 — Redis: distributed rate limiting + shared circuit-breaker state
+
+### What this phase delivers
+
+* `deployments/control-plane/redis.yaml` — a single-instance, ephemeral (no
+  AOF/RDB — losing it just resets counters, not data) `redis:7-alpine`,
+  password-protected, running under PodSecurity `restricted` (uid 999).
+* **`ratelimit` package** — a distributed, wall-clock-aligned fixed-window
+  counter. `RedisRateLimiterBackend` runs an atomic `INCR`+`EXPIRE` Lua script
+  keyed `{key}:{windowBucket}`; `LocalRateLimiterBackend` is a per-JVM fallback
+  using the *same* bucketing so failover doesn't change the algorithm's
+  character. `FailoverRateLimiterBackend` tries Redis first and falls back on
+  any exception — fail-open, not fail-closed.
+* **`circuitbreaker` package** — the same fail-open pattern for CLOSED → OPEN →
+  HALF_OPEN → CLOSED state. `CircuitBreakerLogic` is pure and storage-agnostic
+  (trivially unit-tested); `RedisCircuitBreakerStore` persists each record as
+  JSON; `FailoverCircuitBreakerStore` wraps it with the same local fallback.
+* `POST /api/v1/ratelimit/{key}/check?limit=&windowSeconds=` and
+  `GET/POST /api/v1/circuit-breaker/{key}(/failure|/success)?...` — demo/test
+  hooks standing in for the Phase 13 rule engine, which will call these
+  services directly from real traffic decisions instead of over HTTP.
+* **Not yet wired**: reading `spec.security.rateLimit` / `spec.resilience.circuitBreaker`
+  from a `TrafficRoute` and driving these services automatically — the proto
+  contract (Phase 8) doesn't carry those fields yet either. Phase 9 is
+  deliberately just the shared, fail-open storage primitives; Phase 11 turns
+  them into an actual data-plane feature.
+
+### Commands
+
+```sh
+cd control-plane && mvn test        # 26 unit tests, incl. pure CircuitBreakerLogic + failover-on-exception
+make redis-verify                   # Phase 9 acceptance checks
+```
+
+### Expected output — verified here
+
+```
+$ make redis-verify
+PASS: redis (1/1) and control-plane (2/2) deployed
+PASS: counter continued from pod A's 3 to pod B's 4 -> Redis-shared, not per-replica
+PASS: 6th request over the limit -> 429
+PASS: circuit OPEN after 5 consecutive failures
+PASS: circuit state survived a full control-plane pod restart and auto-recovered to HALF_OPEN
+PASS: rate-limit and circuit-breaker both fail open during a Redis outage (2 fallback log lines)
+PASS: Redis restored
+ALL PHASE 9 CHECKS PASSED
+```
+
+Verified directly against two **different pods** (bypassing the Service, so
+there's no ambiguity about which replica served which request): 3 requests to
+pod A left the shared counter at 3; the very next request to pod B continued
+it to 4, not restarted at 1.
+
+### Failure scenarios to try
+
+| Action | Expected |
+|---|---|
+| `kubectl -n kubetraffic-system scale deploy/kubetraffic-redis --replicas=0` | rate-limit/circuit-breaker calls keep returning `200`/normal bodies (never `500`); logs show `falling back to a local, per-replica store` once (not per-request spam) |
+| restart a control-plane pod while a circuit is `OPEN` | `GET /api/v1/circuit-breaker/{key}` from any replica still shows `OPEN` with the original `openedAt` — state lives in Redis, not pod memory |
+| let `recoverySeconds` elapse, then `GET` the circuit | transitions to `HALF_OPEN` on read (lazy, not a background timer) |
+| record a failure while `HALF_OPEN` | reopens immediately regardless of `threshold` (a failed trial request) |
+| `POST .../success` | fully resets to `CLOSED`, `consecutiveFailures: 0` |
+
+### Verify before Phase 10
+
+- [ ] `mvn test` passes (26 tests: `CircuitBreakerLogicTest`, `CircuitBreakerServiceTest`, `FailoverCircuitBreakerStoreTest`, `RateLimiterServiceTest`, `FailoverRateLimiterBackendTest`, plus Phases 7–8's suites).
+- [ ] `make redis-verify` prints `ALL PHASE 9 CHECKS PASSED`.
+- [ ] The same rate-limit key hit through two different pods shows one continuous count, not two independent ones.
+- [ ] Circuit-breaker state for a key survives a full control-plane pod restart.
+- [ ] Scaling Redis to zero does not turn either endpoint into a `500`.
+
+Then say **"start phase 10"** (canary progression state machine: `POST /api/v1/canary/{route}/start` walks the weight ladder `0→5→10→20→30→50→100` on health, `/rollback` returns to 0 — using the `CircuitBreakerService`/`RateLimiterService` primitives built here, and the audit trail from Phase 7).

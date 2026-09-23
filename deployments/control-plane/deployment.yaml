@@ -48,7 +48,9 @@ spec:
           command:
             - sh
             - -c
-            - "until nc -z kubetraffic-postgres.kubetraffic-system.svc 5432; do echo waiting for postgres; sleep 2; done"
+            - |
+              until nc -z kubetraffic-postgres.kubetraffic-system.svc 5432; do echo waiting for postgres; sleep 2; done
+              until nc -z kubetraffic-redis.kubetraffic-system.svc 6379; do echo waiting for redis; sleep 2; done
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: { drop: ["ALL"] }
@@ -77,6 +79,10 @@ spec:
               valueFrom: { secretKeyRef: { name: kubetraffic-postgres, key: username } }
             - name: DB_PASSWORD
               valueFrom: { secretKeyRef: { name: kubetraffic-postgres, key: password } }
+            - name: REDIS_HOST
+              value: kubetraffic-redis.kubetraffic-system.svc
+            - name: REDIS_PASSWORD
+              valueFrom: { secretKeyRef: { name: kubetraffic-redis, key: password } }
           startupProbe:
             httpGet: { path: /actuator/health/readiness, port: mgmt }
             failureThreshold: 30

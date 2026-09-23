@@ -1,4 +1,11 @@
 /Users/priyanshu/Developer/personal/kubetraffic/control-plane/src/test/java/com/kubetraffic/controlplane/AbstractPostgresIT.java
+/Users/priyanshu/Developer/personal/kubetraffic/control-plane/src/test/java/com/kubetraffic/controlplane/AbstractRedisIT.java
 /Users/priyanshu/Developer/personal/kubetraffic/control-plane/src/test/java/com/kubetraffic/controlplane/api/PolicyApiIT.java
+/Users/priyanshu/Developer/personal/kubetraffic/control-plane/src/test/java/com/kubetraffic/controlplane/api/RateLimitAndCircuitBreakerApiIT.java
+/Users/priyanshu/Developer/personal/kubetraffic/control-plane/src/test/java/com/kubetraffic/controlplane/circuitbreaker/CircuitBreakerLogicTest.java
+/Users/priyanshu/Developer/personal/kubetraffic/control-plane/src/test/java/com/kubetraffic/controlplane/circuitbreaker/CircuitBreakerServiceTest.java
+/Users/priyanshu/Developer/personal/kubetraffic/control-plane/src/test/java/com/kubetraffic/controlplane/circuitbreaker/FailoverCircuitBreakerStoreTest.java
 /Users/priyanshu/Developer/personal/kubetraffic/control-plane/src/test/java/com/kubetraffic/controlplane/grpc/RouteGrpcServiceTest.java
 /Users/priyanshu/Developer/personal/kubetraffic/control-plane/src/test/java/com/kubetraffic/controlplane/policy/PolicyServiceTest.java
+/Users/priyanshu/Developer/personal/kubetraffic/control-plane/src/test/java/com/kubetraffic/controlplane/ratelimit/FailoverRateLimiterBackendTest.java
+/Users/priyanshu/Developer/personal/kubetraffic/control-plane/src/test/java/com/kubetraffic/controlplane/ratelimit/RateLimiterServiceTest.java

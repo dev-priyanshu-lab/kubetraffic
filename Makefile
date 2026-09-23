@@ -146,3 +146,7 @@ control-plane-e2e-verify: ## Run Phase 7 acceptance checks
 .PHONY: grpc-verify
 grpc-verify: ## Run Phase 8 acceptance checks (gRPC control-plane wiring)
 	hack/verify-phase8.sh
+
+.PHONY: redis-verify
+redis-verify: ## Run Phase 9 acceptance checks (Redis-backed rate limit + circuit breaker)
+	hack/verify-phase9.sh
