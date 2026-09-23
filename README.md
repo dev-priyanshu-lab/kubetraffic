@@ -601,3 +601,92 @@ ALL PHASE 7 CHECKS PASSED
 - [ ] Deleting a control-plane pod does not lose the stored policy.
 
 Then say **"start phase 8"** (gRPC between the Go controller and the Java control plane: `.proto` contract, `RegisterRoute` / `GetRouteConfig` / `StreamDecisions`, the controller consumes control-plane weights).
+
+---
+
+## Phase 8 — gRPC: controller ↔ control plane
+
+### What this phase delivers
+
+* `proto/kubetraffic/v1/route.proto` — the shared contract, generated into both
+  languages from the same file: `RouteService` (`RegisterRoute`, `DeleteRoute`,
+  `GetRouteConfig`) and `DecisionService` (`StreamDecisions`, server-streaming).
+  Go codegen via `controller/hack/gen-proto.sh` (protoc + protoc-gen-go/-grpc);
+  Java codegen via the `protobuf-maven-plugin` reading `../proto` at build time
+  (`control-plane/Dockerfile` therefore builds from the **repo root**, not
+  `control-plane/`, so the shared proto is in its Docker build context).
+* **Java (`com.kubetraffic.controlplane.grpc`)**: a hand-rolled `SmartLifecycle`
+  Netty gRPC server on `:9090`. `RouteGrpcService` reuses the **Phase 7**
+  `PolicyService` for persistence — a route is just a policy keyed by its
+  `RouteRef`, with the proto spec stored as JSON (`JsonFormat`). There is no
+  rule engine yet (Phase 13), so `RegisterRoute` echoes the submitted weights
+  back as the effective `RouteConfig` — but it diffs the new spec against
+  whatever was previously stored and **broadcasts a `Decision`** for every
+  version whose weight changed, proving the `StreamDecisions` fan-out before
+  anything autonomous drives it.
+* **Go (`internal/controlplane`)**: a `Client` interface, a real `GRPCClient`,
+  and a `Fake` for tests. The reconciler now calls `RegisterRoute` and builds
+  the HAProxy routing model from the **control plane's returned weights**, not
+  the CRD spec directly (`applyEffectiveWeights`). A `DecisionWatcher`
+  (`manager.Runnable`) holds the `StreamDecisions` connection open, reconnecting
+  with backoff, and enqueues a reconcile for every route a decision names via a
+  `source.Channel` watch.
+* **Resilience**: a `trafficroute.kubetraffic.io/finalizer` finalizer calls
+  `DeleteRoute` before the CRD is removed. On a `RegisterRoute` failure the
+  reconciler falls back to the last-known-good `RouteConfig` cached in memory
+  (new `ControlPlaneRegistered` condition = `False`) instead of either failing
+  or blindly trusting a spec it couldn't get approved — and requeues after a
+  short `ControlPlaneRetryInterval` (15s, not the full 10m resync) so
+  registration self-heals quickly once the control plane comes back.
+
+### Commands
+
+```sh
+controller/hack/gen-proto.sh        # regenerate Go stubs (Java regenerates on every `mvn compile`)
+cd controller && go test ./...      # incl. an in-process bufconn client/server test
+cd control-plane && mvn test        # incl. an in-process gRPC RouteGrpcService/DecisionGrpcService test
+make control-plane-image            # NOTE: builds with repo root as context (-f control-plane/Dockerfile .)
+make -C controller kind-load deploy
+make grpc-verify                    # Phase 8 acceptance checks
+```
+
+### Expected output — verified here
+
+```
+$ make grpc-verify
+PASS: control plane (2/2) and controller (2/2) deployed
+PASS: ControlPlaneRegistered=True, Programmed=True
+PASS: control plane holds a policy for demo/payment-weighted
+PASS: traffic ~90/10 (v1=180, v2=20)
+PASS: control plane broadcast a decision; controller's StreamDecisions watcher received it
+PASS: traffic re-split to ~50/50 (v1=100, v2=100)
+PASS: data plane kept serving the last-known-good 50/50 config while the control plane was down (v1=100/101)
+PASS: control plane recovered; registration self-healed without a spec change
+PASS: traffic converges to the current spec (90/10) once reconnected
+PASS: TrafficRoute removed; control-plane policy deleted via the finalizer
+ALL PHASE 8 CHECKS PASSED
+```
+
+`kubectl -n demo get tr payment-weighted -o json | jq .status.conditions` shows four
+conditions once fully up: `Accepted`, `Resolved`, `ControlPlaneRegistered`,
+`Programmed` — all `True`.
+
+### Failure scenarios to try
+
+| Action | Expected |
+|---|---|
+| `kubectl -n kubetraffic-system scale deploy/kubetraffic-control-plane --replicas=0` | `ControlPlaneRegistered=False reason=Unavailable`; HAProxy keeps serving the **last registered** weights (not the raw spec) unchanged; controller retries every 15s |
+| edit weights while the control plane is down | the edit is accepted by the API server and shows in `spec`, but is **not** applied to the data plane until the control plane is reachable again and the route is re-registered |
+| scale the control plane back up | within ~15s `ControlPlaneRegistered` flips back to `True` and the (now-current) spec's weights take over — no manual nudge needed |
+| `kubectl -n demo delete tr payment-weighted` | the finalizer blocks deletion until `DeleteRoute` succeeds; `GET /api/v1/policies/payment-weighted` on the control plane then returns `404` |
+| kill a `kubetraffic-controller` pod mid-registration | the standby resumes leadership and re-registers (idempotent upsert) on its next reconcile; no duplicate policies (upsert keys on namespace/name) |
+
+### Verify before Phase 9
+
+- [ ] `go test ./...` (controller) and `mvn test` (control-plane) both green, including the new gRPC-specific suites.
+- [ ] `make grpc-verify` prints `ALL PHASE 8 CHECKS PASSED`.
+- [ ] A `TrafficRoute`'s `status.conditions` include `ControlPlaneRegistered`; its data-plane weights come from the control plane's response, not directly from `spec`.
+- [ ] Stopping the control plane does not stop traffic — it freezes the last-approved config; restarting it resumes registration without operator action.
+- [ ] Deleting a `TrafficRoute` deletes its control-plane policy (finalizer-gated).
+
+Then say **"start phase 9"** (PostgreSQL is already in place from Phase 7 — this phase adds Redis for distributed rate-limit counters and shared circuit-breaker state across control-plane replicas).

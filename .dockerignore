@@ -1,0 +1,11 @@
+# Root-level ignore for builds that use the repo root as context (e.g.
+# control-plane/Dockerfile, which needs both control-plane/ and proto/).
+.git
+**/target
+**/bin
+controller/bin
+demo/sample-app/*.md
+*.md
+!README.md
+.idea
+.vscode

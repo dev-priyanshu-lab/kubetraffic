@@ -2,6 +2,9 @@ server:
   port: 8080
   shutdown: graceful
 
+grpc:
+  port: ${GRPC_PORT:9090}
+
 spring:
   application:
     name: kubetraffic-control-plane

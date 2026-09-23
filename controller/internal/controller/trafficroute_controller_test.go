@@ -24,6 +24,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	trafficv1alpha1 "github.com/kubetraffic/controller/api/v1alpha1"
+	"github.com/kubetraffic/controller/internal/controlplane"
+	kubetrafficv1 "github.com/kubetraffic/controller/internal/grpcapi/kubetrafficv1"
 	"github.com/kubetraffic/controller/internal/proxy"
 )
 
@@ -401,5 +403,168 @@ func assertEvent(t *testing.T, rec *record.FakeRecorder, wantReason string) {
 		}
 	default:
 		t.Fatalf("expected an event mentioning %q, got none", wantReason)
+	}
+}
+
+// --- Phase 8: control-plane registration, finalizer, decision wiring -------
+
+func TestApplyEffectiveWeights_OverridesFromControlPlane(t *testing.T) {
+	routes := []trafficv1alpha1.RouteRule{{
+		Path: "/payment",
+		Versions: []trafficv1alpha1.BackendVersion{
+			{Name: "v1", Weight: 90},
+			{Name: "v2", Weight: 10},
+		},
+	}}
+	cfg := &kubetrafficv1.RouteConfig{Rules: []*kubetrafficv1.RuleWeights{{
+		Path: "/payment",
+		Weights: []*kubetrafficv1.VersionWeight{
+			{Version: "v1", Weight: 50},
+			{Version: "v2", Weight: 50},
+		},
+	}}}
+
+	out := applyEffectiveWeights(routes, cfg)
+
+	if out[0].Versions[0].Weight != 50 || out[0].Versions[1].Weight != 50 {
+		t.Fatalf("weights = %+v, want 50/50 from the control plane", out[0].Versions)
+	}
+	// the original slice must be untouched (no aliasing surprises)
+	if routes[0].Versions[0].Weight != 90 {
+		t.Fatalf("input routes mutated: %+v", routes[0].Versions)
+	}
+}
+
+func TestApplyEffectiveWeights_NilConfigIsNoop(t *testing.T) {
+	routes := []trafficv1alpha1.RouteRule{{Path: "/x", Versions: []trafficv1alpha1.BackendVersion{{Name: "v1", Weight: 100}}}}
+	out := applyEffectiveWeights(routes, nil)
+	if out[0].Versions[0].Weight != 100 {
+		t.Fatalf("weight = %d, want unchanged 100", out[0].Versions[0].Weight)
+	}
+}
+
+func TestReconcile_RegistersWithControlPlane(t *testing.T) {
+	tr := validRoute()
+	r, _ := newReconciler(t, tr,
+		paymentService(),
+		readyPod("p1", "v1"), readyPod("p2", "v2"),
+		paymentSlice(ep("10.1.0.1", "p1"), ep("10.1.0.2", "p2")),
+	)
+	fakeCP := controlplane.NewFake()
+	r.ControlPlane = fakeCP
+	r.Proxy = proxy.NewFake()
+
+	if _, err := r.Reconcile(context.Background(), request(tr)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if fakeCP.RegisterCount() != 1 {
+		t.Fatalf("RegisterRoute called %d times, want 1", fakeCP.RegisterCount())
+	}
+
+	var got trafficv1alpha1.TrafficRoute
+	if err := r.Get(context.Background(), request(tr).NamespacedName, &got); err != nil {
+		t.Fatal(err)
+	}
+	if c := conditionStatus(got, ConditionControlPlane); c != metav1.ConditionTrue {
+		t.Fatalf("ControlPlaneRegistered = %q, want True", c)
+	}
+	if got.Status.Phase != trafficv1alpha1.PhaseReady {
+		t.Fatalf("phase = %q, want Ready", got.Status.Phase)
+	}
+}
+
+func TestReconcile_ControlPlaneUnavailable_FallsBackToCachedWeights(t *testing.T) {
+	tr := validRoute() // v1:90 v2:10
+	r, _ := newReconciler(t, tr,
+		paymentService(),
+		readyPod("p1", "v1"), readyPod("p2", "v2"),
+		paymentSlice(ep("10.1.0.1", "p1"), ep("10.1.0.2", "p2")),
+	)
+	fakeCP := controlplane.NewFake()
+	fakeProxy := proxy.NewFake()
+	r.ControlPlane = fakeCP
+	r.Proxy = fakeProxy
+
+	if _, err := r.Reconcile(context.Background(), request(tr)); err != nil {
+		t.Fatalf("first reconcile: unexpected error: %v", err)
+	}
+	if !strings.Contains(fakeProxy.LastApplied().Raw, "weight 90") {
+		t.Fatalf("expected the first apply to use 90/10 (weight 90):\n%s", fakeProxy.LastApplied().Raw)
+	}
+
+	// Change the spec (50/50) AND make the control plane unreachable. The
+	// reconciler must keep serving the cached 90/10 config, not the new spec.
+	var live trafficv1alpha1.TrafficRoute
+	if err := r.Get(context.Background(), request(tr).NamespacedName, &live); err != nil {
+		t.Fatal(err)
+	}
+	live.Spec.Routes[0].Versions[0].Weight = 50
+	live.Spec.Routes[0].Versions[1].Weight = 50
+	if err := r.Update(context.Background(), &live); err != nil {
+		t.Fatal(err)
+	}
+	fakeCP.RegisterErr = context.DeadlineExceeded
+
+	if _, err := r.Reconcile(context.Background(), request(tr)); err != nil {
+		t.Fatalf("second reconcile: unexpected error: %v", err)
+	}
+
+	if !strings.Contains(fakeProxy.LastApplied().Raw, "weight 90") {
+		t.Fatalf("expected the fallback apply to KEEP 90/10 (weight 90), got:\n%s", fakeProxy.LastApplied().Raw)
+	}
+
+	var got trafficv1alpha1.TrafficRoute
+	if err := r.Get(context.Background(), request(tr).NamespacedName, &got); err != nil {
+		t.Fatal(err)
+	}
+	if c := conditionStatus(got, ConditionControlPlane); c != metav1.ConditionFalse {
+		t.Fatalf("ControlPlaneRegistered = %q, want False", c)
+	}
+}
+
+func TestReconcile_Finalizer_AddedOnCreate_DeleteCallsControlPlane(t *testing.T) {
+	tr := validRoute()
+	r, _ := newReconciler(t, tr,
+		paymentService(),
+		readyPod("p1", "v1"), readyPod("p2", "v2"),
+		paymentSlice(ep("10.1.0.1", "p1"), ep("10.1.0.2", "p2")),
+	)
+	fakeCP := controlplane.NewFake()
+	r.ControlPlane = fakeCP
+
+	ctx := context.Background()
+	if _, err := r.Reconcile(ctx, request(tr)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var withFinalizer trafficv1alpha1.TrafficRoute
+	if err := r.Get(ctx, request(tr).NamespacedName, &withFinalizer); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, f := range withFinalizer.Finalizers {
+		if f == trafficRouteFinalizer {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("finalizer not added: %+v", withFinalizer.Finalizers)
+	}
+
+	if err := r.Delete(ctx, &withFinalizer); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Reconcile(ctx, request(tr)); err != nil {
+		t.Fatalf("delete reconcile: unexpected error: %v", err)
+	}
+
+	if len(fakeCP.Deleted) != 1 || fakeCP.Deleted[0].Name != tr.Name {
+		t.Fatalf("DeleteRoute calls = %+v, want one for %s", fakeCP.Deleted, tr.Name)
+	}
+
+	err := r.Get(ctx, request(tr).NamespacedName, &trafficv1alpha1.TrafficRoute{})
+	if err == nil {
+		t.Fatal("expected the TrafficRoute to be gone after the finalizer was removed")
 	}
 }

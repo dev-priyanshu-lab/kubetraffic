@@ -16,6 +16,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -30,14 +31,18 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	trafficv1alpha1 "github.com/kubetraffic/controller/api/v1alpha1"
+	"github.com/kubetraffic/controller/internal/controlplane"
 	"github.com/kubetraffic/controller/internal/discovery"
+	kubetrafficv1 "github.com/kubetraffic/controller/internal/grpcapi/kubetrafficv1"
 	"github.com/kubetraffic/controller/internal/metrics"
 	"github.com/kubetraffic/controller/internal/model"
 	"github.com/kubetraffic/controller/internal/proxy"
@@ -50,14 +55,22 @@ const (
 	// ConditionResolved is True once every backend version has ready endpoints.
 	ConditionResolved = "Resolved"
 	// ConditionProgrammed is True once the routing config is applied to the
-	// data plane. Always False until Phase 5.
+	// data plane.
 	ConditionProgrammed = "Programmed"
+	// ConditionControlPlane is True once the route is registered with the
+	// Java control plane and its effective weights are known.
+	ConditionControlPlane = "ControlPlaneRegistered"
 
-	defaultResyncInterval = 10 * time.Minute
-	defaultVersionLabel   = "app.kubernetes.io/version"
-	maxConditionMessage   = 512
+	defaultResyncInterval            = 10 * time.Minute
+	defaultControlPlaneRetryInterval = 15 * time.Second
+	defaultVersionLabel              = "app.kubernetes.io/version"
+	maxConditionMessage              = 512
 
 	backendServiceIndex = ".spec.routes.backend.service"
+
+	// trafficRouteFinalizer ensures DeleteRoute reaches the control plane
+	// before a TrafficRoute is removed from etcd.
+	trafficRouteFinalizer = "traffic.kubetraffic.io/finalizer"
 )
 
 // TrafficRouteReconciler reconciles a TrafficRoute object.
@@ -70,6 +83,23 @@ type TrafficRouteReconciler struct {
 	// Proxy applies the routing model to the data plane. When nil, the
 	// reconciler resolves endpoints but leaves Programmed=False.
 	Proxy proxy.Proxy
+
+	// ControlPlane registers routes with the Java control plane and returns
+	// their authoritative effective weights. When nil, the reconciler falls
+	// back to the spec's own weights (Phase 4/5 behaviour).
+	ControlPlane controlplane.Client
+
+	// DecisionEvents, when set, is wired into the watch so decisions received
+	// out-of-band (see DecisionWatcher) trigger a reconcile.
+	DecisionEvents <-chan event.GenericEvent
+
+	// ControlPlaneRetryInterval overrides the requeue delay used while the
+	// control plane is unreachable (default 15s; always shorter than
+	// ResyncInterval so registration self-heals promptly after an outage).
+	ControlPlaneRetryInterval time.Duration
+
+	cpCacheMu sync.Mutex
+	cpCache   map[string]*kubetrafficv1.RouteConfig
 }
 
 // +kubebuilder:rbac:groups=traffic.kubetraffic.io,resources=trafficroutes,verbs=get;list;watch;create;update;patch;delete
@@ -91,9 +121,18 @@ func (r *TrafficRouteReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if err := r.Get(ctx, req.NamespacedName, &tr); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+
 	if !tr.DeletionTimestamp.IsZero() {
-		// No finalizer yet: proxy/control-plane teardown arrives in Phase 5.
-		return ctrl.Result{}, nil
+		return r.finalize(ctx, &tr)
+	}
+	if !controllerutil.ContainsFinalizer(&tr, trafficRouteFinalizer) {
+		controllerutil.AddFinalizer(&tr, trafficRouteFinalizer)
+		if err := r.Update(ctx, &tr); err != nil {
+			return ctrl.Result{}, fmt.Errorf("add finalizer: %w", err)
+		}
+		// Adding a finalizer only touches metadata, which GenerationChangedPredicate
+		// filters out of the watch — so fall through and finish reconciling this
+		// pass instead of relying on a requeue that would never come.
 	}
 
 	logger.Info("reconciling", "generation", tr.Generation, "resourceVersion", tr.ResourceVersion)
@@ -180,8 +219,14 @@ func (r *TrafficRouteReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		r.Recorder.Event(&tr, corev1.EventTypeWarning, "EndpointsUnavailable", truncate(strings.Join(issues, "; "), 256))
 	}
 
-	// --- 4. program the data plane -------------------------------------
-	progCond, phaseAfterProgram, progErr := r.program(ctx, &tr, resolved, resolutions)
+	// --- 4. register with the control plane -----------------------------
+	cpCond, cpConfig := r.registerWithControlPlane(ctx, &tr)
+	conds = append(conds, cpCond)
+
+	// --- 5. program the data plane, using the control plane's effective
+	// weights when available (falling back to the spec's own weights) -----
+	effectiveRoutes := applyEffectiveWeights(tr.Spec.Routes, cpConfig)
+	progCond, phaseAfterProgram, progErr := r.program(ctx, &tr, resolved, effectiveRoutes, resolutions)
 	conds = append(conds, progCond)
 	if progErr == nil && resolved && phaseAfterProgram != "" {
 		phase = phaseAfterProgram
@@ -190,11 +235,140 @@ func (r *TrafficRouteReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// --- 5. write status --------------------------------------------
-	result = ctrl.Result{RequeueAfter: r.resync()}
+	requeueAfter := r.resync()
+	if cpCond.Status == metav1.ConditionFalse && r.ControlPlane != nil {
+		// Retry sooner than the full resync interval while the control plane
+		// is unreachable, so registration self-heals quickly once it recovers
+		// instead of waiting up to --resync-interval.
+		requeueAfter = r.controlPlaneRetryInterval()
+	}
+	result = ctrl.Result{RequeueAfter: requeueAfter}
 	if err := r.applyStatus(ctx, &tr, phase, routeStatuses, conds...); err != nil {
 		return result, err
 	}
 	return result, progErr
+}
+
+// finalize handles a TrafficRoute pending deletion: it tells the control
+// plane the route is gone, then drops the finalizer. Returning an error here
+// leaves the finalizer in place and retries with backoff.
+func (r *TrafficRouteReconciler) finalize(ctx context.Context, tr *trafficv1alpha1.TrafficRoute) (ctrl.Result, error) {
+	if !controllerutil.ContainsFinalizer(tr, trafficRouteFinalizer) {
+		return ctrl.Result{}, nil
+	}
+	nn := types.NamespacedName{Namespace: tr.Namespace, Name: tr.Name}
+
+	if r.ControlPlane != nil {
+		if err := r.ControlPlane.DeleteRoute(ctx, nn); err != nil {
+			log.FromContext(ctx).Error(err, "failed to delete route from control plane; retrying")
+			return ctrl.Result{}, fmt.Errorf("delete route from control plane: %w", err)
+		}
+	}
+	r.clearCachedConfig(nn)
+
+	controllerutil.RemoveFinalizer(tr, trafficRouteFinalizer)
+	if err := r.Update(ctx, tr); err != nil {
+		return ctrl.Result{}, fmt.Errorf("remove finalizer: %w", err)
+	}
+	return ctrl.Result{}, nil
+}
+
+// registerWithControlPlane upserts tr with the control plane. On failure it
+// falls back to the last-known-good RouteConfig (so the data plane keeps
+// serving the last approved weights) rather than failing the reconcile.
+func (r *TrafficRouteReconciler) registerWithControlPlane(
+	ctx context.Context, tr *trafficv1alpha1.TrafficRoute,
+) (metav1.Condition, *kubetrafficv1.RouteConfig) {
+	if r.ControlPlane == nil {
+		return metav1.Condition{
+			Type: ConditionControlPlane, Status: metav1.ConditionFalse, Reason: "ControlPlaneNotConfigured",
+			Message: "controller started without --control-plane-grpc-url; using spec weights directly",
+		}, nil
+	}
+
+	nn := types.NamespacedName{Namespace: tr.Namespace, Name: tr.Name}
+	cfg, err := r.ControlPlane.RegisterRoute(ctx, tr)
+	if err == nil {
+		r.setCachedConfig(nn, cfg)
+		return metav1.Condition{
+			Type: ConditionControlPlane, Status: metav1.ConditionTrue, Reason: "Registered",
+			Message: fmt.Sprintf("registered at control-plane generation %d", cfg.GetGeneration()),
+		}, cfg
+	}
+
+	r.Recorder.Event(tr, corev1.EventTypeWarning, "ControlPlaneUnavailable", truncate(err.Error(), 256))
+	if cached := r.cachedConfig(nn); cached != nil {
+		return metav1.Condition{
+			Type: ConditionControlPlane, Status: metav1.ConditionFalse, Reason: "Unavailable",
+			Message: truncate("using last-known-good config: "+err.Error(), maxConditionMessage),
+		}, cached
+	}
+	return metav1.Condition{
+		Type: ConditionControlPlane, Status: metav1.ConditionFalse, Reason: "Unavailable",
+		Message: truncate(err.Error(), maxConditionMessage),
+	}, nil
+}
+
+func (r *TrafficRouteReconciler) cachedConfig(nn types.NamespacedName) *kubetrafficv1.RouteConfig {
+	r.cpCacheMu.Lock()
+	defer r.cpCacheMu.Unlock()
+	return r.cpCache[nn.String()]
+}
+
+func (r *TrafficRouteReconciler) setCachedConfig(nn types.NamespacedName, cfg *kubetrafficv1.RouteConfig) {
+	r.cpCacheMu.Lock()
+	defer r.cpCacheMu.Unlock()
+	if r.cpCache == nil {
+		r.cpCache = map[string]*kubetrafficv1.RouteConfig{}
+	}
+	r.cpCache[nn.String()] = cfg
+}
+
+func (r *TrafficRouteReconciler) clearCachedConfig(nn types.NamespacedName) {
+	r.cpCacheMu.Lock()
+	defer r.cpCacheMu.Unlock()
+	delete(r.cpCache, nn.String())
+}
+
+// applyEffectiveWeights overrides each route's declared version weights with
+// the control plane's effective ones, matched by path then version name.
+// Versions the control plane didn't mention (e.g. it's not configured) keep
+// their spec weight untouched.
+func applyEffectiveWeights(routes []trafficv1alpha1.RouteRule, cfg *kubetrafficv1.RouteConfig) []trafficv1alpha1.RouteRule {
+	if cfg == nil {
+		return routes
+	}
+	byPath := make(map[string]map[string]int32, len(cfg.GetRules()))
+	for _, rw := range cfg.GetRules() {
+		weights := make(map[string]int32, len(rw.GetWeights()))
+		for _, w := range rw.GetWeights() {
+			weights[w.GetVersion()] = w.GetWeight()
+		}
+		byPath[rw.GetPath()] = weights
+	}
+
+	out := make([]trafficv1alpha1.RouteRule, len(routes))
+	for i, rule := range routes {
+		if len(rule.Versions) == 0 {
+			out[i] = rule
+			continue
+		}
+		weights, ok := byPath[routePath(rule)]
+		if !ok {
+			out[i] = rule
+			continue
+		}
+		versions := make([]trafficv1alpha1.BackendVersion, len(rule.Versions))
+		copy(versions, rule.Versions)
+		for j := range versions {
+			if w, ok := weights[versions[j].Name]; ok {
+				versions[j].Weight = w
+			}
+		}
+		rule.Versions = versions
+		out[i] = rule
+	}
+	return out
 }
 
 // program renders the routing model and applies it to the data plane. It returns
@@ -204,6 +378,7 @@ func (r *TrafficRouteReconciler) program(
 	ctx context.Context,
 	tr *trafficv1alpha1.TrafficRoute,
 	resolved bool,
+	effectiveRoutes []trafficv1alpha1.RouteRule,
 	resolutions map[string]discovery.Resolution,
 ) (metav1.Condition, trafficv1alpha1.TrafficRoutePhase, error) {
 	if r.Proxy == nil {
@@ -219,7 +394,7 @@ func (r *TrafficRouteReconciler) program(
 		}, "", nil
 	}
 
-	m := model.Build(tr.Spec.Host, tr.Spec.Routes, resolutions)
+	m := model.Build(tr.Spec.Host, effectiveRoutes, resolutions)
 	cfg, err := r.Proxy.GenerateConfig(m)
 	if err == nil {
 		err = r.Proxy.ApplyConfig(ctx, cfg)
@@ -277,6 +452,13 @@ func (r *TrafficRouteReconciler) resync() time.Duration {
 	return defaultResyncInterval
 }
 
+func (r *TrafficRouteReconciler) controlPlaneRetryInterval() time.Duration {
+	if r.ControlPlaneRetryInterval > 0 {
+		return r.ControlPlaneRetryInterval
+	}
+	return defaultControlPlaneRetryInterval
+}
+
 // SetupWithManager wires the reconciler and its secondary watches.
 func (r *TrafficRouteReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(),
@@ -284,14 +466,18 @@ func (r *TrafficRouteReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return err
 	}
 
-	return ctrl.NewControllerManagedBy(mgr).
+	bld := ctrl.NewControllerManagedBy(mgr).
 		For(&trafficv1alpha1.TrafficRoute{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&corev1.Service{}, handler.EnqueueRequestsFromMapFunc(r.mapService)).
 		Watches(&discoveryv1.EndpointSlice{}, handler.EnqueueRequestsFromMapFunc(r.mapEndpointSlice)).
 		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(r.mapNamespace),
 			builder.WithPredicates(podReadinessChanged())).
-		Named("trafficroute").
-		Complete(r)
+		Named("trafficroute")
+
+	if r.DecisionEvents != nil {
+		bld = bld.WatchesRawSource(source.Channel(r.DecisionEvents, &handler.EnqueueRequestForObject{}))
+	}
+	return bld.Complete(r)
 }
 
 // indexByBackendService lets us look up TrafficRoutes by the Service names they

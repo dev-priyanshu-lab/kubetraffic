@@ -59,8 +59,11 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 15
           resources:
-            requests: { cpu: 50m, memory: 64Mi }
-            limits: { cpu: "1", memory: 256Mi }
+            # HAProxy itself is light, but the Data Plane API (a Go binary run
+            # as a `program`) auto-sizes GOMEMLIMIT near the container ceiling
+            # and got OOMKilled at 256Mi under reload churn.
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: "1", memory: 512Mi }
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: { drop: ["ALL"] }

@@ -1,3 +1,4 @@
 /Users/priyanshu/Developer/personal/kubetraffic/control-plane/src/test/java/com/kubetraffic/controlplane/AbstractPostgresIT.java
 /Users/priyanshu/Developer/personal/kubetraffic/control-plane/src/test/java/com/kubetraffic/controlplane/api/PolicyApiIT.java
+/Users/priyanshu/Developer/personal/kubetraffic/control-plane/src/test/java/com/kubetraffic/controlplane/grpc/RouteGrpcServiceTest.java
 /Users/priyanshu/Developer/personal/kubetraffic/control-plane/src/test/java/com/kubetraffic/controlplane/policy/PolicyServiceTest.java

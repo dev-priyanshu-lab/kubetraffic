@@ -14,6 +14,7 @@ import com.kubetraffic.controlplane.persistence.PolicyRepository;
 import com.kubetraffic.controlplane.policy.PolicyDtos.CreateRequest;
 import com.kubetraffic.controlplane.policy.PolicyDtos.Response;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -67,6 +68,20 @@ public class PolicyService {
     return policies.findAll().stream().map(this::toResponse).toList();
   }
 
+  /**
+   * Create-or-update: used by the gRPC RegisterRoute RPC, which is always an
+   * idempotent upsert (the caller doesn't know whether the route already
+   * exists on the control plane).
+   */
+  @Transactional
+  public Response upsert(String namespace, String name, JsonNode spec) {
+    String ns = namespaceOrDefault(namespace);
+    if (policies.existsByNamespaceAndName(ns, name)) {
+      return update(ns, name, spec);
+    }
+    return create(new CreateRequest(ns, name, spec));
+  }
+
   @Transactional
   public Response update(String namespace, String name, JsonNode newSpec) {
     String ns = namespaceOrDefault(namespace);
@@ -90,6 +105,25 @@ public class PolicyService {
     PolicyEntity entity = require(ns, name);
     policies.delete(entity); // config_version rows cascade in the DB
     audit.record("api", "policy.delete", target(ns, name), null);
+  }
+
+  /** Non-throwing lookup, for callers (e.g. gRPC) that treat "absent" as data, not an error. */
+  @Transactional(readOnly = true)
+  public Optional<Response> tryGet(String namespace, String name) {
+    return policies.findByNamespaceAndName(namespaceOrDefault(namespace), name).map(this::toResponse);
+  }
+
+  /** Idempotent delete: a no-op if the policy does not exist. */
+  @Transactional
+  public void deleteIfExists(String namespace, String name) {
+    String ns = namespaceOrDefault(namespace);
+    policies
+        .findByNamespaceAndName(ns, name)
+        .ifPresent(
+            entity -> {
+              policies.delete(entity);
+              audit.record("api", "policy.delete", target(ns, name), null);
+            });
   }
 
   @Transactional(readOnly = true)

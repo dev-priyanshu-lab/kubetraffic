@@ -1,0 +1,98 @@
+// Copyright 2026 The KubeTraffic Authors.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Shared gRPC contract between the Go controller and the Java control plane.
+// Regenerate with:
+//   controller/hack/gen-proto.sh   (Go)
+//   mvn generate-sources           (Java, via control-plane/pom.xml)
+syntax = "proto3";
+
+package kubetraffic.v1;
+
+option go_package = "github.com/kubetraffic/controller/internal/grpcapi/kubetrafficv1;kubetrafficv1";
+option java_package = "com.kubetraffic.controlplane.grpc.v1";
+option java_multiple_files = true;
+option java_outer_classname = "RouteProto";
+
+import "google/protobuf/empty.proto";
+
+// RouteRef identifies a TrafficRoute by namespace/name.
+message RouteRef {
+  string namespace = 1;
+  string name = 2;
+}
+
+// RouteVersionSpec is one weighted backend version as declared by the CRD.
+message RouteVersionSpec {
+  string name = 1;
+  int32 weight = 2;
+}
+
+// RulePolicy is one path rule within a TrafficRoute.
+message RulePolicy {
+  string path = 1;
+  string backend_service = 2;
+  int32 backend_port = 3;
+  string strategy = 4; // WEIGHTED | CANARY | BLUE_GREEN
+  repeated RouteVersionSpec versions = 5;
+}
+
+// RouteSpec is the desired state the controller registers with the control
+// plane. It mirrors (a subset of) the TrafficRoute CRD spec.
+message RouteSpec {
+  RouteRef ref = 1;
+  string host = 2;
+  int64 generation = 3;
+  repeated RulePolicy rules = 4;
+}
+
+// VersionWeight is one effective, control-plane-approved weight.
+message VersionWeight {
+  string version = 1;
+  int32 weight = 2;
+}
+
+// RuleWeights is the effective weight set for one path rule.
+message RuleWeights {
+  string path = 1;
+  repeated VersionWeight weights = 2;
+}
+
+// RouteConfig is the control plane's authoritative view of a route: the
+// weights the data plane should actually be programmed with.
+message RouteConfig {
+  RouteRef ref = 1;
+  int64 generation = 2;
+  repeated RuleWeights rules = 3;
+}
+
+service RouteService {
+  // RegisterRoute idempotently upserts a route's desired spec and returns the
+  // current effective configuration.
+  rpc RegisterRoute(RouteSpec) returns (RouteConfig);
+  // DeleteRoute removes a route the controller no longer manages.
+  rpc DeleteRoute(RouteRef) returns (google.protobuf.Empty);
+  // GetRouteConfig polls the effective configuration. Used as a fallback when
+  // the decision stream is unavailable.
+  rpc GetRouteConfig(RouteRef) returns (RouteConfig);
+}
+
+// Decision is one traffic-shifting action taken (or, until the rule engine
+// lands in Phase 13, echoed) by the control plane for a route/path/version.
+message Decision {
+  RouteRef ref = 1;
+  string path = 2;
+  string version = 3;
+  int32 old_weight = 4;
+  int32 new_weight = 5;
+  string reason = 6;
+  int64 timestamp_unix_ms = 7;
+}
+
+message WatchDecisionsRequest {}
+
+service DecisionService {
+  // StreamDecisions pushes every effective-weight change the control plane
+  // records, so controllers react without polling.
+  rpc StreamDecisions(WatchDecisionsRequest) returns (stream Decision);
+}

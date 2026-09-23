@@ -128,7 +128,7 @@ control-plane-verify-full: ## Full mvn verify incl. Testcontainers ITs
 
 .PHONY: control-plane-image
 control-plane-image: ## Build + load the control-plane image into kind
-	docker build --provenance=false -t kubetraffic/control-plane:dev control-plane
+	docker build --provenance=false -f control-plane/Dockerfile -t kubetraffic/control-plane:dev .
 	kind load docker-image kubetraffic/control-plane:dev --name kubetraffic
 
 .PHONY: control-plane-deploy
@@ -142,3 +142,7 @@ control-plane-undeploy: ## Remove PostgreSQL + control plane
 .PHONY: control-plane-e2e-verify
 control-plane-e2e-verify: ## Run Phase 7 acceptance checks
 	hack/verify-phase7.sh
+
+.PHONY: grpc-verify
+grpc-verify: ## Run Phase 8 acceptance checks (gRPC control-plane wiring)
+	hack/verify-phase8.sh

@@ -49,6 +49,7 @@ spec:
             - --haproxy-dataplane-url=http://kubetraffic-dataplane.kubetraffic-data.svc:5555
             - --haproxy-dataplane-username=admin
             - --haproxy-dataplane-password-file=/etc/kubetraffic/dataplane/password
+            - --control-plane-grpc-url=kubetraffic-control-plane.kubetraffic-system.svc:9090
           volumeMounts:
             - name: dataplane-auth
               mountPath: /etc/kubetraffic/dataplane

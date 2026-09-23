@@ -13,6 +13,7 @@ spec:
   ports:
     - { name: http, port: 8080, targetPort: http }
     - { name: mgmt, port: 8081, targetPort: mgmt }
+    - { name: grpc, port: 9090, targetPort: grpc }
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -68,6 +69,7 @@ spec:
           ports:
             - { name: http, containerPort: 8080 }
             - { name: mgmt, containerPort: 8081 }
+            - { name: grpc, containerPort: 9090 }
           env:
             - name: DB_URL
               value: jdbc:postgresql://kubetraffic-postgres.kubetraffic-system.svc:5432/kubetraffic
