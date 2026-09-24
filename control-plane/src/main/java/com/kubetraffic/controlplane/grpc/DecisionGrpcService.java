@@ -16,11 +16,15 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * Implements DecisionService.StreamDecisions as a simple fan-out: every
- * connected controller gets every decision. Until the rule engine (Phase 13)
- * exists, decisions are only produced by {@link RouteGrpcService} echoing spec
- * weight changes — but the wiring here (subscribe, fan-out, unsubscribe on
- * cancel) is exactly what the real engine will use.
+ * Implements DecisionService.StreamDecisions as a simple fan-out to whichever
+ * controllers happen to be subscribed <b>to this pod</b>. That "this pod" is
+ * the reason business services never call {@link #fanOutLocally} directly: a
+ * gRPC connection sticks to one replica for its lifetime, so a decision
+ * produced while handling a REST call on replica B would never reach a
+ * controller subscribed to replica A. {@link RedisDecisionPublisher} is the
+ * real {@link DecisionPublisher} — it publishes to every replica over Redis
+ * Pub/Sub, and {@link DecisionFanoutSubscriber} calls back into this class's
+ * {@link #fanOutLocally} on each one.
  */
 @Component
 public class DecisionGrpcService extends DecisionServiceGrpc.DecisionServiceImplBase {
@@ -44,8 +48,8 @@ public class DecisionGrpcService extends DecisionServiceGrpc.DecisionServiceImpl
     }
   }
 
-  /** Pushes a decision to every currently-connected subscriber. */
-  public void broadcast(Decision decision) {
+  /** Pushes a decision to every subscriber connected to this replica. */
+  public void fanOutLocally(Decision decision) {
     log.info(
         "decision route={}/{} path={} version={} weight {}->{} reason={}",
         decision.getRef().getNamespace(),

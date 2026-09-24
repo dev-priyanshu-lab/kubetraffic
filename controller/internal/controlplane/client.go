@@ -124,6 +124,7 @@ func BuildRouteSpec(tr *trafficv1alpha1.TrafficRoute) *kubetrafficv1.RouteSpec {
 			BackendService: rule.Backend.Service,
 			BackendPort:    rule.Backend.Port,
 			Strategy:       string(rule.Strategy.Type),
+			Resilience:     buildResiliencePolicy(rule.Resilience),
 		}
 		for _, v := range rule.Versions {
 			wireRule.Versions = append(wireRule.Versions, &kubetrafficv1.RouteVersionSpec{
@@ -133,6 +134,33 @@ func BuildRouteSpec(tr *trafficv1alpha1.TrafficRoute) *kubetrafficv1.RouteSpec {
 		spec.Rules = append(spec.Rules, wireRule)
 	}
 	return spec
+}
+
+// buildResiliencePolicy converts the CRD's optional resilience block into its
+// wire form. Returns nil when the rule declares no resilience policy at all.
+func buildResiliencePolicy(r *trafficv1alpha1.ResiliencePolicy) *kubetrafficv1.ResiliencePolicy {
+	if r == nil {
+		return nil
+	}
+	wire := &kubetrafficv1.ResiliencePolicy{
+		TimeoutMs: int32(r.Timeout.Duration.Milliseconds()),
+	}
+	if r.Retries != nil {
+		wire.Retries = &kubetrafficv1.RetryPolicy{
+			Attempts:        r.Retries.Attempts,
+			PerTryTimeoutMs: int32(r.Retries.PerTryTimeout.Duration.Milliseconds()),
+			RetryOn:         r.Retries.RetryOn,
+		}
+	}
+	if r.CircuitBreaker != nil {
+		wire.CircuitBreaker = &kubetrafficv1.CircuitBreakerPolicy{
+			Enabled:           r.CircuitBreaker.Enabled,
+			FailureThreshold:  r.CircuitBreaker.FailureThreshold,
+			RecoveryTimeoutMs: int32(r.CircuitBreaker.RecoveryTimeout.Duration.Milliseconds()),
+			HalfOpenRequests:  r.CircuitBreaker.HalfOpenRequests,
+		}
+	}
+	return wire
 }
 
 // PassThroughConfig builds a RouteConfig whose weights are copied verbatim

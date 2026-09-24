@@ -22,6 +22,7 @@ private static final long serialVersionUID = 0L;
   }
   private VersionWeight() {
     version_ = "";
+    circuitState_ = "";
   }
 
   @java.lang.Override
@@ -94,6 +95,53 @@ private static final long serialVersionUID = 0L;
     return weight_;
   }
 
+  public static final int CIRCUIT_STATE_FIELD_NUMBER = 3;
+  @SuppressWarnings("serial")
+  private volatile java.lang.Object circuitState_ = "";
+  /**
+   * <pre>
+   * "" | CLOSED | OPEN | HALF_OPEN — empty when no circuit breaker is active.
+   * </pre>
+   *
+   * <code>string circuit_state = 3;</code>
+   * @return The circuitState.
+   */
+  @java.lang.Override
+  public java.lang.String getCircuitState() {
+    java.lang.Object ref = circuitState_;
+    if (ref instanceof java.lang.String) {
+      return (java.lang.String) ref;
+    } else {
+      com.google.protobuf.ByteString bs = 
+          (com.google.protobuf.ByteString) ref;
+      java.lang.String s = bs.toStringUtf8();
+      circuitState_ = s;
+      return s;
+    }
+  }
+  /**
+   * <pre>
+   * "" | CLOSED | OPEN | HALF_OPEN — empty when no circuit breaker is active.
+   * </pre>
+   *
+   * <code>string circuit_state = 3;</code>
+   * @return The bytes for circuitState.
+   */
+  @java.lang.Override
+  public com.google.protobuf.ByteString
+      getCircuitStateBytes() {
+    java.lang.Object ref = circuitState_;
+    if (ref instanceof java.lang.String) {
+      com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString.copyFromUtf8(
+              (java.lang.String) ref);
+      circuitState_ = b;
+      return b;
+    } else {
+      return (com.google.protobuf.ByteString) ref;
+    }
+  }
+
   private byte memoizedIsInitialized = -1;
   @java.lang.Override
   public final boolean isInitialized() {
@@ -114,6 +162,9 @@ private static final long serialVersionUID = 0L;
     if (weight_ != 0) {
       output.writeInt32(2, weight_);
     }
+    if (!com.google.protobuf.GeneratedMessageV3.isStringEmpty(circuitState_)) {
+      com.google.protobuf.GeneratedMessageV3.writeString(output, 3, circuitState_);
+    }
     getUnknownFields().writeTo(output);
   }
 
@@ -129,6 +180,9 @@ private static final long serialVersionUID = 0L;
     if (weight_ != 0) {
       size += com.google.protobuf.CodedOutputStream
         .computeInt32Size(2, weight_);
+    }
+    if (!com.google.protobuf.GeneratedMessageV3.isStringEmpty(circuitState_)) {
+      size += com.google.protobuf.GeneratedMessageV3.computeStringSize(3, circuitState_);
     }
     size += getUnknownFields().getSerializedSize();
     memoizedSize = size;
@@ -149,6 +203,8 @@ private static final long serialVersionUID = 0L;
         .equals(other.getVersion())) return false;
     if (getWeight()
         != other.getWeight()) return false;
+    if (!getCircuitState()
+        .equals(other.getCircuitState())) return false;
     if (!getUnknownFields().equals(other.getUnknownFields())) return false;
     return true;
   }
@@ -164,6 +220,8 @@ private static final long serialVersionUID = 0L;
     hash = (53 * hash) + getVersion().hashCode();
     hash = (37 * hash) + WEIGHT_FIELD_NUMBER;
     hash = (53 * hash) + getWeight();
+    hash = (37 * hash) + CIRCUIT_STATE_FIELD_NUMBER;
+    hash = (53 * hash) + getCircuitState().hashCode();
     hash = (29 * hash) + getUnknownFields().hashCode();
     memoizedHashCode = hash;
     return hash;
@@ -301,6 +359,7 @@ private static final long serialVersionUID = 0L;
       bitField0_ = 0;
       version_ = "";
       weight_ = 0;
+      circuitState_ = "";
       return this;
     }
 
@@ -339,6 +398,9 @@ private static final long serialVersionUID = 0L;
       }
       if (((from_bitField0_ & 0x00000002) != 0)) {
         result.weight_ = weight_;
+      }
+      if (((from_bitField0_ & 0x00000004) != 0)) {
+        result.circuitState_ = circuitState_;
       }
     }
 
@@ -394,6 +456,11 @@ private static final long serialVersionUID = 0L;
       if (other.getWeight() != 0) {
         setWeight(other.getWeight());
       }
+      if (!other.getCircuitState().isEmpty()) {
+        circuitState_ = other.circuitState_;
+        bitField0_ |= 0x00000004;
+        onChanged();
+      }
       this.mergeUnknownFields(other.getUnknownFields());
       onChanged();
       return this;
@@ -430,6 +497,11 @@ private static final long serialVersionUID = 0L;
               bitField0_ |= 0x00000002;
               break;
             } // case 16
+            case 26: {
+              circuitState_ = input.readStringRequireUtf8();
+              bitField0_ |= 0x00000004;
+              break;
+            } // case 26
             default: {
               if (!super.parseUnknownField(input, extensionRegistry, tag)) {
                 done = true; // was an endgroup tag
@@ -547,6 +619,98 @@ private static final long serialVersionUID = 0L;
     public Builder clearWeight() {
       bitField0_ = (bitField0_ & ~0x00000002);
       weight_ = 0;
+      onChanged();
+      return this;
+    }
+
+    private java.lang.Object circuitState_ = "";
+    /**
+     * <pre>
+     * "" | CLOSED | OPEN | HALF_OPEN — empty when no circuit breaker is active.
+     * </pre>
+     *
+     * <code>string circuit_state = 3;</code>
+     * @return The circuitState.
+     */
+    public java.lang.String getCircuitState() {
+      java.lang.Object ref = circuitState_;
+      if (!(ref instanceof java.lang.String)) {
+        com.google.protobuf.ByteString bs =
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        circuitState_ = s;
+        return s;
+      } else {
+        return (java.lang.String) ref;
+      }
+    }
+    /**
+     * <pre>
+     * "" | CLOSED | OPEN | HALF_OPEN — empty when no circuit breaker is active.
+     * </pre>
+     *
+     * <code>string circuit_state = 3;</code>
+     * @return The bytes for circuitState.
+     */
+    public com.google.protobuf.ByteString
+        getCircuitStateBytes() {
+      java.lang.Object ref = circuitState_;
+      if (ref instanceof String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        circuitState_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+    /**
+     * <pre>
+     * "" | CLOSED | OPEN | HALF_OPEN — empty when no circuit breaker is active.
+     * </pre>
+     *
+     * <code>string circuit_state = 3;</code>
+     * @param value The circuitState to set.
+     * @return This builder for chaining.
+     */
+    public Builder setCircuitState(
+        java.lang.String value) {
+      if (value == null) { throw new NullPointerException(); }
+      circuitState_ = value;
+      bitField0_ |= 0x00000004;
+      onChanged();
+      return this;
+    }
+    /**
+     * <pre>
+     * "" | CLOSED | OPEN | HALF_OPEN — empty when no circuit breaker is active.
+     * </pre>
+     *
+     * <code>string circuit_state = 3;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearCircuitState() {
+      circuitState_ = getDefaultInstance().getCircuitState();
+      bitField0_ = (bitField0_ & ~0x00000004);
+      onChanged();
+      return this;
+    }
+    /**
+     * <pre>
+     * "" | CLOSED | OPEN | HALF_OPEN — empty when no circuit breaker is active.
+     * </pre>
+     *
+     * <code>string circuit_state = 3;</code>
+     * @param value The bytes for circuitState to set.
+     * @return This builder for chaining.
+     */
+    public Builder setCircuitStateBytes(
+        com.google.protobuf.ByteString value) {
+      if (value == null) { throw new NullPointerException(); }
+      checkByteStringIsUtf8(value);
+      circuitState_ = value;
+      bitField0_ |= 0x00000004;
       onChanged();
       return this;
     }

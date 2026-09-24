@@ -28,6 +28,29 @@ message RouteVersionSpec {
   int32 weight = 2;
 }
 
+// RetryPolicy mirrors TrafficRoute spec.rules[].resilience.retries.
+message RetryPolicy {
+  int32 attempts = 1;
+  int32 per_try_timeout_ms = 2;
+  // "5xx" | "gateway-error" | "connect-failure" | "retriable-status-codes" | "reset"
+  repeated string retry_on = 3;
+}
+
+// CircuitBreakerPolicy mirrors spec.rules[].resilience.circuitBreaker.
+message CircuitBreakerPolicy {
+  bool enabled = 1;
+  int32 failure_threshold = 2;
+  int32 recovery_timeout_ms = 3;
+  int32 half_open_requests = 4;
+}
+
+// ResiliencePolicy mirrors spec.rules[].resilience.
+message ResiliencePolicy {
+  int32 timeout_ms = 1;
+  RetryPolicy retries = 2;
+  CircuitBreakerPolicy circuit_breaker = 3;
+}
+
 // RulePolicy is one path rule within a TrafficRoute.
 message RulePolicy {
   string path = 1;
@@ -35,6 +58,7 @@ message RulePolicy {
   int32 backend_port = 3;
   string strategy = 4; // WEIGHTED | CANARY | BLUE_GREEN
   repeated RouteVersionSpec versions = 5;
+  ResiliencePolicy resilience = 6;
 }
 
 // RouteSpec is the desired state the controller registers with the control
@@ -50,6 +74,8 @@ message RouteSpec {
 message VersionWeight {
   string version = 1;
   int32 weight = 2;
+  // "" | CLOSED | OPEN | HALF_OPEN — empty when no circuit breaker is active.
+  string circuit_state = 3;
 }
 
 // RuleWeights is the effective weight set for one path rule.

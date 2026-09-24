@@ -47,6 +47,7 @@ private static final long serialVersionUID = 0L;
             com.kubetraffic.controlplane.grpc.v1.RulePolicy.class, com.kubetraffic.controlplane.grpc.v1.RulePolicy.Builder.class);
   }
 
+  private int bitField0_;
   public static final int PATH_FIELD_NUMBER = 1;
   @SuppressWarnings("serial")
   private volatile java.lang.Object path_ = "";
@@ -224,6 +225,32 @@ private static final long serialVersionUID = 0L;
     return versions_.get(index);
   }
 
+  public static final int RESILIENCE_FIELD_NUMBER = 6;
+  private com.kubetraffic.controlplane.grpc.v1.ResiliencePolicy resilience_;
+  /**
+   * <code>.kubetraffic.v1.ResiliencePolicy resilience = 6;</code>
+   * @return Whether the resilience field is set.
+   */
+  @java.lang.Override
+  public boolean hasResilience() {
+    return ((bitField0_ & 0x00000001) != 0);
+  }
+  /**
+   * <code>.kubetraffic.v1.ResiliencePolicy resilience = 6;</code>
+   * @return The resilience.
+   */
+  @java.lang.Override
+  public com.kubetraffic.controlplane.grpc.v1.ResiliencePolicy getResilience() {
+    return resilience_ == null ? com.kubetraffic.controlplane.grpc.v1.ResiliencePolicy.getDefaultInstance() : resilience_;
+  }
+  /**
+   * <code>.kubetraffic.v1.ResiliencePolicy resilience = 6;</code>
+   */
+  @java.lang.Override
+  public com.kubetraffic.controlplane.grpc.v1.ResiliencePolicyOrBuilder getResilienceOrBuilder() {
+    return resilience_ == null ? com.kubetraffic.controlplane.grpc.v1.ResiliencePolicy.getDefaultInstance() : resilience_;
+  }
+
   private byte memoizedIsInitialized = -1;
   @java.lang.Override
   public final boolean isInitialized() {
@@ -253,6 +280,9 @@ private static final long serialVersionUID = 0L;
     for (int i = 0; i < versions_.size(); i++) {
       output.writeMessage(5, versions_.get(i));
     }
+    if (((bitField0_ & 0x00000001) != 0)) {
+      output.writeMessage(6, getResilience());
+    }
     getUnknownFields().writeTo(output);
   }
 
@@ -279,6 +309,10 @@ private static final long serialVersionUID = 0L;
       size += com.google.protobuf.CodedOutputStream
         .computeMessageSize(5, versions_.get(i));
     }
+    if (((bitField0_ & 0x00000001) != 0)) {
+      size += com.google.protobuf.CodedOutputStream
+        .computeMessageSize(6, getResilience());
+    }
     size += getUnknownFields().getSerializedSize();
     memoizedSize = size;
     return size;
@@ -304,6 +338,11 @@ private static final long serialVersionUID = 0L;
         .equals(other.getStrategy())) return false;
     if (!getVersionsList()
         .equals(other.getVersionsList())) return false;
+    if (hasResilience() != other.hasResilience()) return false;
+    if (hasResilience()) {
+      if (!getResilience()
+          .equals(other.getResilience())) return false;
+    }
     if (!getUnknownFields().equals(other.getUnknownFields())) return false;
     return true;
   }
@@ -326,6 +365,10 @@ private static final long serialVersionUID = 0L;
     if (getVersionsCount() > 0) {
       hash = (37 * hash) + VERSIONS_FIELD_NUMBER;
       hash = (53 * hash) + getVersionsList().hashCode();
+    }
+    if (hasResilience()) {
+      hash = (37 * hash) + RESILIENCE_FIELD_NUMBER;
+      hash = (53 * hash) + getResilience().hashCode();
     }
     hash = (29 * hash) + getUnknownFields().hashCode();
     memoizedHashCode = hash;
@@ -450,13 +493,20 @@ private static final long serialVersionUID = 0L;
 
     // Construct using com.kubetraffic.controlplane.grpc.v1.RulePolicy.newBuilder()
     private Builder() {
-
+      maybeForceBuilderInitialization();
     }
 
     private Builder(
         com.google.protobuf.GeneratedMessageV3.BuilderParent parent) {
       super(parent);
-
+      maybeForceBuilderInitialization();
+    }
+    private void maybeForceBuilderInitialization() {
+      if (com.google.protobuf.GeneratedMessageV3
+              .alwaysUseFieldBuilders) {
+        getVersionsFieldBuilder();
+        getResilienceFieldBuilder();
+      }
     }
     @java.lang.Override
     public Builder clear() {
@@ -473,6 +523,11 @@ private static final long serialVersionUID = 0L;
         versionsBuilder_.clear();
       }
       bitField0_ = (bitField0_ & ~0x00000010);
+      resilience_ = null;
+      if (resilienceBuilder_ != null) {
+        resilienceBuilder_.dispose();
+        resilienceBuilder_ = null;
+      }
       return this;
     }
 
@@ -531,6 +586,14 @@ private static final long serialVersionUID = 0L;
       if (((from_bitField0_ & 0x00000008) != 0)) {
         result.strategy_ = strategy_;
       }
+      int to_bitField0_ = 0;
+      if (((from_bitField0_ & 0x00000020) != 0)) {
+        result.resilience_ = resilienceBuilder_ == null
+            ? resilience_
+            : resilienceBuilder_.build();
+        to_bitField0_ |= 0x00000001;
+      }
+      result.bitField0_ |= to_bitField0_;
     }
 
     @java.lang.Override
@@ -621,6 +684,9 @@ private static final long serialVersionUID = 0L;
           }
         }
       }
+      if (other.hasResilience()) {
+        mergeResilience(other.getResilience());
+      }
       this.mergeUnknownFields(other.getUnknownFields());
       onChanged();
       return this;
@@ -680,6 +746,13 @@ private static final long serialVersionUID = 0L;
               }
               break;
             } // case 42
+            case 50: {
+              input.readMessage(
+                  getResilienceFieldBuilder().getBuilder(),
+                  extensionRegistry);
+              bitField0_ |= 0x00000020;
+              break;
+            } // case 50
             default: {
               if (!super.parseUnknownField(input, extensionRegistry, tag)) {
                 done = true; // was an endgroup tag
@@ -1203,6 +1276,127 @@ private static final long serialVersionUID = 0L;
         versions_ = null;
       }
       return versionsBuilder_;
+    }
+
+    private com.kubetraffic.controlplane.grpc.v1.ResiliencePolicy resilience_;
+    private com.google.protobuf.SingleFieldBuilderV3<
+        com.kubetraffic.controlplane.grpc.v1.ResiliencePolicy, com.kubetraffic.controlplane.grpc.v1.ResiliencePolicy.Builder, com.kubetraffic.controlplane.grpc.v1.ResiliencePolicyOrBuilder> resilienceBuilder_;
+    /**
+     * <code>.kubetraffic.v1.ResiliencePolicy resilience = 6;</code>
+     * @return Whether the resilience field is set.
+     */
+    public boolean hasResilience() {
+      return ((bitField0_ & 0x00000020) != 0);
+    }
+    /**
+     * <code>.kubetraffic.v1.ResiliencePolicy resilience = 6;</code>
+     * @return The resilience.
+     */
+    public com.kubetraffic.controlplane.grpc.v1.ResiliencePolicy getResilience() {
+      if (resilienceBuilder_ == null) {
+        return resilience_ == null ? com.kubetraffic.controlplane.grpc.v1.ResiliencePolicy.getDefaultInstance() : resilience_;
+      } else {
+        return resilienceBuilder_.getMessage();
+      }
+    }
+    /**
+     * <code>.kubetraffic.v1.ResiliencePolicy resilience = 6;</code>
+     */
+    public Builder setResilience(com.kubetraffic.controlplane.grpc.v1.ResiliencePolicy value) {
+      if (resilienceBuilder_ == null) {
+        if (value == null) {
+          throw new NullPointerException();
+        }
+        resilience_ = value;
+      } else {
+        resilienceBuilder_.setMessage(value);
+      }
+      bitField0_ |= 0x00000020;
+      onChanged();
+      return this;
+    }
+    /**
+     * <code>.kubetraffic.v1.ResiliencePolicy resilience = 6;</code>
+     */
+    public Builder setResilience(
+        com.kubetraffic.controlplane.grpc.v1.ResiliencePolicy.Builder builderForValue) {
+      if (resilienceBuilder_ == null) {
+        resilience_ = builderForValue.build();
+      } else {
+        resilienceBuilder_.setMessage(builderForValue.build());
+      }
+      bitField0_ |= 0x00000020;
+      onChanged();
+      return this;
+    }
+    /**
+     * <code>.kubetraffic.v1.ResiliencePolicy resilience = 6;</code>
+     */
+    public Builder mergeResilience(com.kubetraffic.controlplane.grpc.v1.ResiliencePolicy value) {
+      if (resilienceBuilder_ == null) {
+        if (((bitField0_ & 0x00000020) != 0) &&
+          resilience_ != null &&
+          resilience_ != com.kubetraffic.controlplane.grpc.v1.ResiliencePolicy.getDefaultInstance()) {
+          getResilienceBuilder().mergeFrom(value);
+        } else {
+          resilience_ = value;
+        }
+      } else {
+        resilienceBuilder_.mergeFrom(value);
+      }
+      if (resilience_ != null) {
+        bitField0_ |= 0x00000020;
+        onChanged();
+      }
+      return this;
+    }
+    /**
+     * <code>.kubetraffic.v1.ResiliencePolicy resilience = 6;</code>
+     */
+    public Builder clearResilience() {
+      bitField0_ = (bitField0_ & ~0x00000020);
+      resilience_ = null;
+      if (resilienceBuilder_ != null) {
+        resilienceBuilder_.dispose();
+        resilienceBuilder_ = null;
+      }
+      onChanged();
+      return this;
+    }
+    /**
+     * <code>.kubetraffic.v1.ResiliencePolicy resilience = 6;</code>
+     */
+    public com.kubetraffic.controlplane.grpc.v1.ResiliencePolicy.Builder getResilienceBuilder() {
+      bitField0_ |= 0x00000020;
+      onChanged();
+      return getResilienceFieldBuilder().getBuilder();
+    }
+    /**
+     * <code>.kubetraffic.v1.ResiliencePolicy resilience = 6;</code>
+     */
+    public com.kubetraffic.controlplane.grpc.v1.ResiliencePolicyOrBuilder getResilienceOrBuilder() {
+      if (resilienceBuilder_ != null) {
+        return resilienceBuilder_.getMessageOrBuilder();
+      } else {
+        return resilience_ == null ?
+            com.kubetraffic.controlplane.grpc.v1.ResiliencePolicy.getDefaultInstance() : resilience_;
+      }
+    }
+    /**
+     * <code>.kubetraffic.v1.ResiliencePolicy resilience = 6;</code>
+     */
+    private com.google.protobuf.SingleFieldBuilderV3<
+        com.kubetraffic.controlplane.grpc.v1.ResiliencePolicy, com.kubetraffic.controlplane.grpc.v1.ResiliencePolicy.Builder, com.kubetraffic.controlplane.grpc.v1.ResiliencePolicyOrBuilder> 
+        getResilienceFieldBuilder() {
+      if (resilienceBuilder_ == null) {
+        resilienceBuilder_ = new com.google.protobuf.SingleFieldBuilderV3<
+            com.kubetraffic.controlplane.grpc.v1.ResiliencePolicy, com.kubetraffic.controlplane.grpc.v1.ResiliencePolicy.Builder, com.kubetraffic.controlplane.grpc.v1.ResiliencePolicyOrBuilder>(
+                getResilience(),
+                getParentForChildren(),
+                isClean());
+        resilience_ = null;
+      }
+      return resilienceBuilder_;
     }
     @java.lang.Override
     public final Builder setUnknownFields(

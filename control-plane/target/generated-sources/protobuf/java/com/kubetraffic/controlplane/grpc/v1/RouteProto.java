@@ -26,6 +26,21 @@ public final class RouteProto {
     com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
       internal_static_kubetraffic_v1_RouteVersionSpec_fieldAccessorTable;
   static final com.google.protobuf.Descriptors.Descriptor
+    internal_static_kubetraffic_v1_RetryPolicy_descriptor;
+  static final 
+    com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
+      internal_static_kubetraffic_v1_RetryPolicy_fieldAccessorTable;
+  static final com.google.protobuf.Descriptors.Descriptor
+    internal_static_kubetraffic_v1_CircuitBreakerPolicy_descriptor;
+  static final 
+    com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
+      internal_static_kubetraffic_v1_CircuitBreakerPolicy_fieldAccessorTable;
+  static final com.google.protobuf.Descriptors.Descriptor
+    internal_static_kubetraffic_v1_ResiliencePolicy_descriptor;
+  static final 
+    com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
+      internal_static_kubetraffic_v1_ResiliencePolicy_fieldAccessorTable;
+  static final com.google.protobuf.Descriptors.Descriptor
     internal_static_kubetraffic_v1_RulePolicy_descriptor;
   static final 
     com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
@@ -73,36 +88,47 @@ public final class RouteProto {
       "c.v1\032\033google/protobuf/empty.proto\"+\n\010Rou" +
       "teRef\022\021\n\tnamespace\030\001 \001(\t\022\014\n\004name\030\002 \001(\t\"0" +
       "\n\020RouteVersionSpec\022\014\n\004name\030\001 \001(\t\022\016\n\006weig" +
-      "ht\030\002 \001(\005\"\217\001\n\nRulePolicy\022\014\n\004path\030\001 \001(\t\022\027\n" +
-      "\017backend_service\030\002 \001(\t\022\024\n\014backend_port\030\003" +
-      " \001(\005\022\020\n\010strategy\030\004 \001(\t\0222\n\010versions\030\005 \003(\013" +
-      "2 .kubetraffic.v1.RouteVersionSpec\"\177\n\tRo" +
-      "uteSpec\022%\n\003ref\030\001 \001(\0132\030.kubetraffic.v1.Ro" +
-      "uteRef\022\014\n\004host\030\002 \001(\t\022\022\n\ngeneration\030\003 \001(\003" +
-      "\022)\n\005rules\030\004 \003(\0132\032.kubetraffic.v1.RulePol" +
-      "icy\"0\n\rVersionWeight\022\017\n\007version\030\001 \001(\t\022\016\n" +
-      "\006weight\030\002 \001(\005\"K\n\013RuleWeights\022\014\n\004path\030\001 \001" +
-      "(\t\022.\n\007weights\030\002 \003(\0132\035.kubetraffic.v1.Ver" +
-      "sionWeight\"t\n\013RouteConfig\022%\n\003ref\030\001 \001(\0132\030" +
-      ".kubetraffic.v1.RouteRef\022\022\n\ngeneration\030\002" +
-      " \001(\003\022*\n\005rules\030\003 \003(\0132\033.kubetraffic.v1.Rul" +
-      "eWeights\"\243\001\n\010Decision\022%\n\003ref\030\001 \001(\0132\030.kub" +
-      "etraffic.v1.RouteRef\022\014\n\004path\030\002 \001(\t\022\017\n\007ve" +
-      "rsion\030\003 \001(\t\022\022\n\nold_weight\030\004 \001(\005\022\022\n\nnew_w" +
-      "eight\030\005 \001(\005\022\016\n\006reason\030\006 \001(\t\022\031\n\021timestamp" +
-      "_unix_ms\030\007 \001(\003\"\027\n\025WatchDecisionsRequest2" +
-      "\341\001\n\014RouteService\022G\n\rRegisterRoute\022\031.kube" +
-      "traffic.v1.RouteSpec\032\033.kubetraffic.v1.Ro" +
-      "uteConfig\022?\n\013DeleteRoute\022\030.kubetraffic.v" +
-      "1.RouteRef\032\026.google.protobuf.Empty\022G\n\016Ge" +
-      "tRouteConfig\022\030.kubetraffic.v1.RouteRef\032\033" +
-      ".kubetraffic.v1.RouteConfig2g\n\017DecisionS" +
-      "ervice\022T\n\017StreamDecisions\022%.kubetraffic." +
-      "v1.WatchDecisionsRequest\032\030.kubetraffic.v" +
-      "1.Decision0\001B\204\001\n$com.kubetraffic.control" +
-      "plane.grpc.v1B\nRouteProtoP\001ZNgithub.com/" +
-      "kubetraffic/controller/internal/grpcapi/" +
-      "kubetrafficv1;kubetrafficv1b\006proto3"
+      "ht\030\002 \001(\005\"M\n\013RetryPolicy\022\020\n\010attempts\030\001 \001(" +
+      "\005\022\032\n\022per_try_timeout_ms\030\002 \001(\005\022\020\n\010retry_o" +
+      "n\030\003 \003(\t\"{\n\024CircuitBreakerPolicy\022\017\n\007enabl" +
+      "ed\030\001 \001(\010\022\031\n\021failure_threshold\030\002 \001(\005\022\033\n\023r" +
+      "ecovery_timeout_ms\030\003 \001(\005\022\032\n\022half_open_re" +
+      "quests\030\004 \001(\005\"\223\001\n\020ResiliencePolicy\022\022\n\ntim" +
+      "eout_ms\030\001 \001(\005\022,\n\007retries\030\002 \001(\0132\033.kubetra" +
+      "ffic.v1.RetryPolicy\022=\n\017circuit_breaker\030\003" +
+      " \001(\0132$.kubetraffic.v1.CircuitBreakerPoli" +
+      "cy\"\305\001\n\nRulePolicy\022\014\n\004path\030\001 \001(\t\022\027\n\017backe" +
+      "nd_service\030\002 \001(\t\022\024\n\014backend_port\030\003 \001(\005\022\020" +
+      "\n\010strategy\030\004 \001(\t\0222\n\010versions\030\005 \003(\0132 .kub" +
+      "etraffic.v1.RouteVersionSpec\0224\n\nresilien" +
+      "ce\030\006 \001(\0132 .kubetraffic.v1.ResiliencePoli" +
+      "cy\"\177\n\tRouteSpec\022%\n\003ref\030\001 \001(\0132\030.kubetraff" +
+      "ic.v1.RouteRef\022\014\n\004host\030\002 \001(\t\022\022\n\ngenerati" +
+      "on\030\003 \001(\003\022)\n\005rules\030\004 \003(\0132\032.kubetraffic.v1" +
+      ".RulePolicy\"G\n\rVersionWeight\022\017\n\007version\030" +
+      "\001 \001(\t\022\016\n\006weight\030\002 \001(\005\022\025\n\rcircuit_state\030\003" +
+      " \001(\t\"K\n\013RuleWeights\022\014\n\004path\030\001 \001(\t\022.\n\007wei" +
+      "ghts\030\002 \003(\0132\035.kubetraffic.v1.VersionWeigh" +
+      "t\"t\n\013RouteConfig\022%\n\003ref\030\001 \001(\0132\030.kubetraf" +
+      "fic.v1.RouteRef\022\022\n\ngeneration\030\002 \001(\003\022*\n\005r" +
+      "ules\030\003 \003(\0132\033.kubetraffic.v1.RuleWeights\"" +
+      "\243\001\n\010Decision\022%\n\003ref\030\001 \001(\0132\030.kubetraffic." +
+      "v1.RouteRef\022\014\n\004path\030\002 \001(\t\022\017\n\007version\030\003 \001" +
+      "(\t\022\022\n\nold_weight\030\004 \001(\005\022\022\n\nnew_weight\030\005 \001" +
+      "(\005\022\016\n\006reason\030\006 \001(\t\022\031\n\021timestamp_unix_ms\030" +
+      "\007 \001(\003\"\027\n\025WatchDecisionsRequest2\341\001\n\014Route" +
+      "Service\022G\n\rRegisterRoute\022\031.kubetraffic.v" +
+      "1.RouteSpec\032\033.kubetraffic.v1.RouteConfig" +
+      "\022?\n\013DeleteRoute\022\030.kubetraffic.v1.RouteRe" +
+      "f\032\026.google.protobuf.Empty\022G\n\016GetRouteCon" +
+      "fig\022\030.kubetraffic.v1.RouteRef\032\033.kubetraf" +
+      "fic.v1.RouteConfig2g\n\017DecisionService\022T\n" +
+      "\017StreamDecisions\022%.kubetraffic.v1.WatchD" +
+      "ecisionsRequest\032\030.kubetraffic.v1.Decisio" +
+      "n0\001B\204\001\n$com.kubetraffic.controlplane.grp" +
+      "c.v1B\nRouteProtoP\001ZNgithub.com/kubetraff" +
+      "ic/controller/internal/grpcapi/kubetraff" +
+      "icv1;kubetrafficv1b\006proto3"
     };
     descriptor = com.google.protobuf.Descriptors.FileDescriptor
       .internalBuildGeneratedFileFrom(descriptorData,
@@ -121,44 +147,62 @@ public final class RouteProto {
       com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
         internal_static_kubetraffic_v1_RouteVersionSpec_descriptor,
         new java.lang.String[] { "Name", "Weight", });
-    internal_static_kubetraffic_v1_RulePolicy_descriptor =
+    internal_static_kubetraffic_v1_RetryPolicy_descriptor =
       getDescriptor().getMessageTypes().get(2);
+    internal_static_kubetraffic_v1_RetryPolicy_fieldAccessorTable = new
+      com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
+        internal_static_kubetraffic_v1_RetryPolicy_descriptor,
+        new java.lang.String[] { "Attempts", "PerTryTimeoutMs", "RetryOn", });
+    internal_static_kubetraffic_v1_CircuitBreakerPolicy_descriptor =
+      getDescriptor().getMessageTypes().get(3);
+    internal_static_kubetraffic_v1_CircuitBreakerPolicy_fieldAccessorTable = new
+      com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
+        internal_static_kubetraffic_v1_CircuitBreakerPolicy_descriptor,
+        new java.lang.String[] { "Enabled", "FailureThreshold", "RecoveryTimeoutMs", "HalfOpenRequests", });
+    internal_static_kubetraffic_v1_ResiliencePolicy_descriptor =
+      getDescriptor().getMessageTypes().get(4);
+    internal_static_kubetraffic_v1_ResiliencePolicy_fieldAccessorTable = new
+      com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
+        internal_static_kubetraffic_v1_ResiliencePolicy_descriptor,
+        new java.lang.String[] { "TimeoutMs", "Retries", "CircuitBreaker", });
+    internal_static_kubetraffic_v1_RulePolicy_descriptor =
+      getDescriptor().getMessageTypes().get(5);
     internal_static_kubetraffic_v1_RulePolicy_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
         internal_static_kubetraffic_v1_RulePolicy_descriptor,
-        new java.lang.String[] { "Path", "BackendService", "BackendPort", "Strategy", "Versions", });
+        new java.lang.String[] { "Path", "BackendService", "BackendPort", "Strategy", "Versions", "Resilience", });
     internal_static_kubetraffic_v1_RouteSpec_descriptor =
-      getDescriptor().getMessageTypes().get(3);
+      getDescriptor().getMessageTypes().get(6);
     internal_static_kubetraffic_v1_RouteSpec_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
         internal_static_kubetraffic_v1_RouteSpec_descriptor,
         new java.lang.String[] { "Ref", "Host", "Generation", "Rules", });
     internal_static_kubetraffic_v1_VersionWeight_descriptor =
-      getDescriptor().getMessageTypes().get(4);
+      getDescriptor().getMessageTypes().get(7);
     internal_static_kubetraffic_v1_VersionWeight_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
         internal_static_kubetraffic_v1_VersionWeight_descriptor,
-        new java.lang.String[] { "Version", "Weight", });
+        new java.lang.String[] { "Version", "Weight", "CircuitState", });
     internal_static_kubetraffic_v1_RuleWeights_descriptor =
-      getDescriptor().getMessageTypes().get(5);
+      getDescriptor().getMessageTypes().get(8);
     internal_static_kubetraffic_v1_RuleWeights_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
         internal_static_kubetraffic_v1_RuleWeights_descriptor,
         new java.lang.String[] { "Path", "Weights", });
     internal_static_kubetraffic_v1_RouteConfig_descriptor =
-      getDescriptor().getMessageTypes().get(6);
+      getDescriptor().getMessageTypes().get(9);
     internal_static_kubetraffic_v1_RouteConfig_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
         internal_static_kubetraffic_v1_RouteConfig_descriptor,
         new java.lang.String[] { "Ref", "Generation", "Rules", });
     internal_static_kubetraffic_v1_Decision_descriptor =
-      getDescriptor().getMessageTypes().get(7);
+      getDescriptor().getMessageTypes().get(10);
     internal_static_kubetraffic_v1_Decision_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
         internal_static_kubetraffic_v1_Decision_descriptor,
         new java.lang.String[] { "Ref", "Path", "Version", "OldWeight", "NewWeight", "Reason", "TimestampUnixMs", });
     internal_static_kubetraffic_v1_WatchDecisionsRequest_descriptor =
-      getDescriptor().getMessageTypes().get(8);
+      getDescriptor().getMessageTypes().get(11);
     internal_static_kubetraffic_v1_WatchDecisionsRequest_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
         internal_static_kubetraffic_v1_WatchDecisionsRequest_descriptor,

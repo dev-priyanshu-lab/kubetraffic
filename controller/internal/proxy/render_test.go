@@ -63,6 +63,55 @@ func TestRender_NoHost(t *testing.T) {
 	}
 }
 
+func TestRender_ResilienceOmittedWhenNil(t *testing.T) {
+	// A rule with no resilience policy must render byte-identically to before
+	// Phase 11 added the feature — no stray timeout/retry lines.
+	cfg, err := NewRenderer("x").Render(sampleModel())
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := cfg.Raw[strings.Index(cfg.Raw, "backend kt_be_deadbeef"):]
+	for _, unwanted := range []string{"retries ", "retry-on", "option redispatch", "timeout connect", "timeout server"} {
+		if strings.Contains(backend, unwanted) {
+			t.Fatalf("rendered backend unexpectedly contains %q\n---\n%s", unwanted, backend)
+		}
+	}
+}
+
+func TestRender_ResiliencePerBackend(t *testing.T) {
+	m := model.RoutingModel{
+		Host: "api.example.com",
+		Rules: []model.Rule{{
+			Path:        "/payment",
+			BackendName: "kt_be_deadbeef",
+			Resilience: &model.Resilience{
+				TimeoutMS:        2000,
+				ConnectTimeoutMS: 2000,
+				Retries:          3,
+				RetryOn:          []string{"5xx", "conn-failure"},
+			},
+			Servers: []model.Server{
+				{Name: "v1-0", Address: "10.0.0.1", Port: 8080, Weight: 100, Version: "v1"},
+			},
+		}},
+	}
+	cfg, err := NewRenderer("x").Render(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"timeout connect 2000ms",
+		"timeout server 2000ms",
+		"retries 3",
+		"option redispatch",
+		"retry-on 5xx conn-failure",
+	} {
+		if !strings.Contains(cfg.Raw, want) {
+			t.Fatalf("rendered config missing %q\n---\n%s", want, cfg.Raw)
+		}
+	}
+}
+
 func TestRender_LongestPathFirst(t *testing.T) {
 	m := model.RoutingModel{
 		Host: "api.example.com",

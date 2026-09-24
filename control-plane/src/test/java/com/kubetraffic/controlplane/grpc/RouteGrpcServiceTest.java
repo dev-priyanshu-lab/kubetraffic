@@ -7,12 +7,15 @@ package com.kubetraffic.controlplane.grpc;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kubetraffic.controlplane.canary.CanaryService;
 import com.kubetraffic.controlplane.grpc.v1.Decision;
 import com.kubetraffic.controlplane.grpc.v1.DecisionServiceGrpc;
 import com.kubetraffic.controlplane.grpc.v1.RouteConfig;
@@ -24,6 +27,7 @@ import com.kubetraffic.controlplane.grpc.v1.RulePolicy;
 import com.kubetraffic.controlplane.grpc.v1.WatchDecisionsRequest;
 import com.kubetraffic.controlplane.policy.PolicyDtos.Response;
 import com.kubetraffic.controlplane.policy.PolicyService;
+import com.kubetraffic.controlplane.routing.RouteConfigService;
 import io.grpc.ManagedChannel;
 import io.grpc.Server;
 import io.grpc.Status;
@@ -45,19 +49,27 @@ import org.junit.jupiter.api.Test;
 class RouteGrpcServiceTest {
 
   private final PolicyService policies = mock(PolicyService.class);
+  private final CanaryService canaries = mock(CanaryService.class);
   private final DecisionGrpcService decisionService = new DecisionGrpcService();
+  // In production, DecisionPublisher goes through Redis Pub/Sub so every replica's local
+  // subscribers hear about it (see RedisDecisionPublisher); in this single-instance test the
+  // in-process fan-out IS the local delivery, so publishing can call it directly.
+  private final DecisionPublisher decisions = decisionService::fanOutLocally;
   private final ObjectMapper mapper = new ObjectMapper();
+  private final RouteConfigService routeConfigs = new RouteConfigService(policies, canaries);
 
   private Server server;
   private ManagedChannel channel;
 
   @BeforeEach
   void startInProcessServer() throws Exception {
+    when(canaries.effectiveWeights(any(), anyString())).thenReturn(Optional.empty());
+
     String name = InProcessServerBuilder.generateName();
     server =
         InProcessServerBuilder.forName(name)
             .directExecutor()
-            .addService(new RouteGrpcService(policies, decisionService, mapper))
+            .addService(new RouteGrpcService(policies, routeConfigs, decisions, mapper))
             .addService(decisionService)
             .build()
             .start();
@@ -89,11 +101,22 @@ class RouteGrpcServiceTest {
         UUID.randomUUID(), ns, name, generation, new ObjectMapper().createObjectNode(), Instant.now(), Instant.now());
   }
 
+  private static Response response(String ns, String name, long generation, JsonNode spec) {
+    return new Response(UUID.randomUUID(), ns, name, generation, spec, Instant.now(), Instant.now());
+  }
+
   @Test
-  void registerRoute_createsWhenAbsent() {
-    when(policies.tryGet("demo", "payment-route")).thenReturn(Optional.empty());
-    when(policies.upsert(eq("demo"), eq("payment-route"), any()))
-        .thenReturn(response("demo", "payment-route", 1L));
+  void registerRoute_createsWhenAbsent() throws Exception {
+    Response saved =
+        response(
+            "demo",
+            "payment-route",
+            1L,
+            mapper.readTree(
+                "{\"rules\":[{\"path\":\"/payment\",\"versions\":"
+                    + "[{\"name\":\"v1\",\"weight\":90},{\"name\":\"v2\",\"weight\":10}]}]}"));
+    when(policies.tryGet("demo", "payment-route")).thenReturn(Optional.empty(), Optional.of(saved));
+    when(policies.upsert(eq("demo"), eq("payment-route"), any())).thenReturn(saved);
 
     RouteConfig config =
         RouteServiceGrpc.newBlockingStub(channel).registerRoute(spec("demo", "payment-route", 90, 10));
@@ -186,6 +209,30 @@ class RouteGrpcServiceTest {
         .isInstanceOf(StatusRuntimeException.class)
         .extracting(e -> ((StatusRuntimeException) e).getStatus().getCode())
         .isEqualTo(Status.Code.NOT_FOUND);
+  }
+
+  @Test
+  void registerRoute_usesCanaryOverrideWeightsInsteadOfSpecWeights() throws Exception {
+    Response saved =
+        response(
+            "demo",
+            "payment-route",
+            1L,
+            mapper.readTree(
+                "{\"rules\":[{\"path\":\"/payment\",\"versions\":"
+                    + "[{\"name\":\"v1\",\"weight\":90},{\"name\":\"v2\",\"weight\":10}]}]}"));
+    when(policies.tryGet("demo", "payment-route")).thenReturn(Optional.empty(), Optional.of(saved));
+    when(policies.upsert(eq("demo"), eq("payment-route"), any())).thenReturn(saved);
+    when(canaries.effectiveWeights(eq(saved.id()), eq("/payment")))
+        .thenReturn(Optional.of(java.util.Map.of("v1", 70, "v2", 30)));
+
+    RouteConfig config =
+        RouteServiceGrpc.newBlockingStub(channel).registerRoute(spec("demo", "payment-route", 90, 10));
+
+    var weights = config.getRules(0).getWeightsList();
+    assertThat(weights).extracting("version", "weight")
+        .containsExactlyInAnyOrder(
+            org.assertj.core.groups.Tuple.tuple("v1", 70), org.assertj.core.groups.Tuple.tuple("v2", 30));
   }
 
   @Test

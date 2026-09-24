@@ -4,15 +4,17 @@
  */
 package com.kubetraffic.controlplane.api;
 
-import com.kubetraffic.controlplane.policy.ConflictException;
-import com.kubetraffic.controlplane.policy.NotFoundException;
 import java.util.stream.Collectors;
+
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+
+import com.kubetraffic.controlplane.policy.ConflictException;
+import com.kubetraffic.controlplane.policy.NotFoundException;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
@@ -41,5 +43,10 @@ public class ApiExceptionHandler {
             .collect(Collectors.joining("; "));
     return ProblemDetail.forStatusAndDetail(
         HttpStatus.BAD_REQUEST, detail.isBlank() ? "request body is invalid" : detail);
+  }
+
+  @ExceptionHandler(IllegalArgumentException.class)
+  public ProblemDetail illegalArgument(IllegalArgumentException ex) {
+    return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
   }
 }

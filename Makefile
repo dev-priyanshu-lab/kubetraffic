@@ -150,3 +150,24 @@ grpc-verify: ## Run Phase 8 acceptance checks (gRPC control-plane wiring)
 .PHONY: redis-verify
 redis-verify: ## Run Phase 9 acceptance checks (Redis-backed rate limit + circuit breaker)
 	hack/verify-phase9.sh
+
+.PHONY: canary-verify
+canary-verify: ## Run Phase 10 acceptance checks (canary progression state machine)
+	hack/verify-phase10.sh
+
+.PHONY: console-image
+console-image: ## Build + load the console image into kind
+	docker build -t kubetraffic/console:dev console
+	kind load docker-image kubetraffic/console:dev --name kubetraffic
+
+.PHONY: console-deploy
+console-deploy: console-image ## Deploy the web console
+	kubectl apply -k deployments/console
+
+.PHONY: console-undeploy
+console-undeploy: ## Remove the web console
+	kubectl delete -k deployments/console --ignore-not-found
+
+.PHONY: console-dev
+console-dev: ## Run the console dev server against a port-forwarded control plane
+	cd console && npm run dev

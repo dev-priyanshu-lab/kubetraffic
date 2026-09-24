@@ -81,4 +81,19 @@ public interface RulePolicyOrBuilder extends
    */
   com.kubetraffic.controlplane.grpc.v1.RouteVersionSpecOrBuilder getVersionsOrBuilder(
       int index);
+
+  /**
+   * <code>.kubetraffic.v1.ResiliencePolicy resilience = 6;</code>
+   * @return Whether the resilience field is set.
+   */
+  boolean hasResilience();
+  /**
+   * <code>.kubetraffic.v1.ResiliencePolicy resilience = 6;</code>
+   * @return The resilience.
+   */
+  com.kubetraffic.controlplane.grpc.v1.ResiliencePolicy getResilience();
+  /**
+   * <code>.kubetraffic.v1.ResiliencePolicy resilience = 6;</code>
+   */
+  com.kubetraffic.controlplane.grpc.v1.ResiliencePolicyOrBuilder getResilienceOrBuilder();
 }

@@ -765,3 +765,128 @@ it to 4, not restarted at 1.
 - [ ] Scaling Redis to zero does not turn either endpoint into a `500`.
 
 Then say **"start phase 10"** (canary progression state machine: `POST /api/v1/canary/{route}/start` walks the weight ladder `0→5→10→20→30→50→100` on health, `/rollback` returns to 0 — using the `CircuitBreakerService`/`RateLimiterService` primitives built here, and the audit trail from Phase 7).
+
+---
+
+## Phase 10 — Canary progression state machine
+
+### What this phase delivers
+
+* `canary` package — `CanaryLadder` (pure step validation), `CanaryStatus`
+  (`PROGRESSING → PROMOTED` or `→ ROLLED_BACK`), and `CanaryService`: one row
+  per (policy, path) in a new `canary_state` table, tracking `stepIndex`, the
+  weight ladder, and status.
+* `POST /api/v1/canary/{name}/start|promote|rollback`, `GET .../{name}` —
+  `path` defaults to `/`. `start` upserts (re-running it resets progression);
+  `promote` walks the ladder and is a no-op once `PROMOTED`; `rollback` forces
+  0% and works from **any** state, including `PROMOTED` — a bad rollout found
+  after full promotion still needs an escape hatch.
+* **Wired into live traffic**: `RouteGrpcService` now asks `CanaryService` for
+  an effective-weight override before falling back to the spec's declared
+  weights, for both `RegisterRoute` and `GetRouteConfig`. Every transition also
+  publishes a `Decision` and writes an audit entry — reusing the Phase 8
+  broadcast mechanism and the Phase 7 audit trail exactly as designed.
+* **Bug found and fixed while wiring this up**: the decision fan-out was an
+  in-memory `Set<StreamObserver>` **per control-plane replica**. A controller's
+  gRPC connection sticks to one replica for its life, so a canary REST call
+  handled by the *other* replica silently never reached it — the state changed
+  in Postgres, but the controller was never told. Fixed with **Redis Pub/Sub**:
+  `RedisDecisionPublisher` publishes to a `kubetraffic:decisions` channel every
+  replica subscribes to (`DecisionFanoutSubscriber` fans it out to that
+  replica's own local gRPC subscribers). Fails open — if Redis is down the REST
+  call still succeeds (state is already durable in Postgres); the controller
+  just won't hear about it until its next resync.
+* Still manual (Phase 13 automates it): nothing watches error rate/latency and
+  calls `promote`/`rollback` on its own yet.
+
+### Commands
+
+```sh
+cd control-plane && mvn test    # 41 unit tests, incl. CanaryLadder/CanaryService/ladder-walk
+make canary-verify               # Phase 10 acceptance checks
+```
+
+### Expected output — verified here
+
+```
+$ make canary-verify
+PASS: demo route Ready and registered with the control plane
+PASS: canary started at 5%
+PASS: live traffic follows 95/5 (v1=95, v2=5)
+PASS: live traffic follows ~50/50 (v1=50, v2=50)
+PASS: reached PROMOTED at 100%; further promote is a no-op
+PASS: traffic fully back on v1 after rollback (v1=60, v2=0)
+PASS: audit log has 18 canary entries
+ALL PHASE 10 CHECKS PASSED
+```
+
+Each traffic-split assertion is a real `curl` sample through the live HAProxy
+gateway — start (95/5) → promote (50/50) → promote (100/0, `PROMOTED`) →
+rollback (100/0 the other way) — with each step's weight change confirmed via
+`kubectl logs` showing `received decision ... reason=canary-<action>` on the
+controller.
+
+### Failure scenarios to try
+
+| Action | Expected |
+|---|---|
+| `promote` a route with no canary started | `404` (`NotFoundException`) |
+| `start` with steps not ending at 100, e.g. `[10,50]` | `400` (`CanaryLadder` rejects it) |
+| `rollback` after already `PROMOTED` | succeeds — `ROLLED_BACK`, weight 0, no special-casing needed |
+| scale `kubetraffic-control-plane` to 1 replica mid-canary, then back to 2 | no behavior change — Postgres/Redis are the source of truth, not replica count |
+| `kubectl -n kubetraffic-system scale deploy/kubetraffic-redis --replicas=0`, then `promote` | the REST call still returns `200` and the DB state changes; the controller won't reprogram HAProxy until its next resync (bounded by `--resync-interval`, or the 15s control-plane-unavailable retry if that's also down) |
+
+### Verify before Phase 11
+
+- [ ] `mvn test` passes (41 tests across policy/grpc/ratelimit/circuitbreaker/canary).
+- [ ] `make canary-verify` prints `ALL PHASE 10 CHECKS PASSED`.
+- [ ] A canary `start`/`promote`/`rollback` sequence produces the matching live traffic split at every step, not just a correct API response.
+- [ ] `kubectl logs` on the controller shows `received decision ... reason=canary-*` for each transition, regardless of which control-plane pod served the REST call.
+- [ ] The audit log lists every canary transition under `policy/<namespace>/<name><path>`.
+
+Then say **"start phase 11"** (circuit breaker / retry / timeout: wire `CircuitBreakerService` and the CRD's `spec.resilience` block into actual request handling, extending the proto contract to carry those fields).
+
+## Console — web UI
+
+A Vite + React + TypeScript single-page app (`console/`) for operating KubeTraffic without touching `kubectl` or `curl` directly: a routes list, a route detail view with live canary-aware weights and canary start/promote/rollback controls, a global audit log, and a playground for exercising the rate-limiter and circuit-breaker primitives directly.
+
+It talks only to the control plane's REST API (`/api/v1/...`), never to Kubernetes directly, so it works the same way whether it's run against a laptop kind cluster or a real deployment.
+
+### Runtime-configurable API endpoint
+
+The console is built once and configured at container **start**, not at build time, so the same published image works against any operator's control plane:
+
+- `index.html` loads `/config.js` before the app bundle. That file sets `window.__KUBETRAFFIC_CONFIG__.apiBaseUrl`.
+- In the container image, `docker-entrypoint.sh` runs as an nginx `docker-entrypoint.d` hook and regenerates `/config.js` from the `KUBETRAFFIC_API_BASE_URL` environment variable every time the container starts.
+- An empty value (the default) means "same origin as the console" — the expected setup behind a reverse proxy/ingress that forwards `/api` to the control plane. Otherwise, set it to the control plane's externally reachable URL, e.g. `KUBETRAFFIC_API_BASE_URL=https://api.kubetraffic.example.com`.
+- The control plane's CORS policy is likewise configurable: `CORS_ALLOWED_ORIGINS` (see `application.yml`), defaulting to `*` for ease of first-run setup.
+
+### Running locally (dev server)
+
+```sh
+kubectl port-forward -n kubetraffic-system svc/kubetraffic-control-plane 18080:8080 &
+cd console && npm install && npm run dev
+```
+
+The dev server proxies same-origin `/api/*` calls to `localhost:18080` (see `vite.config.ts`), so no `config.js` edits are needed for local development.
+
+### Deploying to the cluster
+
+```sh
+make console-deploy   # builds+loads the image, applies deployments/console
+kubectl port-forward -n kubetraffic-system svc/kubetraffic-console 8080:8080
+```
+
+Then open `http://localhost:8080`. By default `KUBETRAFFIC_API_BASE_URL` is empty (same-origin); for a kind/local setup without an ingress tying the two services together, point it at a reachable control-plane URL instead, e.g.:
+
+```sh
+kubectl set env deployment/kubetraffic-console -n kubetraffic-system \
+  KUBETRAFFIC_API_BASE_URL=http://localhost:18080   # matches a control-plane port-forward
+```
+
+### Verified
+
+- `npm run build` (`tsc -b && vite build`) succeeds with no type errors.
+- The container image builds, runs as a non-root user with a read-only root filesystem, injects `config.js` from `KUBETRAFFIC_API_BASE_URL` at startup, serves the SPA (client-side routes fall back to `index.html`), and passes its `/healthz` readiness/liveness probes — confirmed both standalone (`docker run`) and deployed to the kind cluster.
+- End-to-end REST round trips (create policy → read live route-config → delete) succeed through both the dev-server proxy and the deployed container pointed at a port-forwarded control plane, including cross-origin CORS headers.
+- **Not verified**: actual rendering/interaction in a browser — this session has no browser tool. The API integration, build, and container behavior are confirmed; visually exercising the UI (clicking through canary controls, checking responsive layout, etc.) still needs a manual pass in an actual browser.

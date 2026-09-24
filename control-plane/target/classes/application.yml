@@ -5,6 +5,10 @@ server:
 grpc:
   port: ${GRPC_PORT:9090}
 
+kubetraffic:
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:*}
+
 spring:
   application:
     name: kubetraffic-control-plane

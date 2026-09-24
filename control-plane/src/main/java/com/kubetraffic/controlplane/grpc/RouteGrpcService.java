@@ -17,6 +17,8 @@ import com.kubetraffic.controlplane.grpc.v1.RuleWeights;
 import com.kubetraffic.controlplane.grpc.v1.VersionWeight;
 import com.kubetraffic.controlplane.policy.PolicyDtos.Response;
 import com.kubetraffic.controlplane.policy.PolicyService;
+import com.kubetraffic.controlplane.routing.RouteConfigDtos;
+import com.kubetraffic.controlplane.routing.RouteConfigService;
 import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import java.util.HashMap;
@@ -32,11 +34,13 @@ import org.springframework.stereotype.Component;
  * RouteRef, {@code spec} is the RouteSpec re-encoded as JSON via {@link
  * JsonFormat} so the storage layer stays proto-agnostic.
  *
- * <p>There is no decision engine yet (Phase 13): {@link #registerRoute}
- * returns the submitted weights unchanged, but it DOES compare them against
- * whatever was previously stored and broadcasts a {@link Decision} for every
- * version whose weight changed — proving the StreamDecisions plumbing end to
- * end before the rule engine exists to drive it autonomously.
+ * <p>There is no autonomous rule engine yet (Phase 13): the weights returned
+ * here come from {@link RouteConfigService} — an active canary progression for
+ * the path if one exists, otherwise the spec's own declared weights, unchanged.
+ * {@link #registerRoute} also diffs the *spec's* weights against whatever was
+ * previously stored and broadcasts a {@link Decision} for every version whose
+ * weight changed, independent of any canary — proving the StreamDecisions
+ * plumbing before an autonomous engine drives it.
  */
 @Component
 public class RouteGrpcService extends RouteServiceGrpc.RouteServiceImplBase {
@@ -44,11 +48,14 @@ public class RouteGrpcService extends RouteServiceGrpc.RouteServiceImplBase {
   private static final Logger log = LoggerFactory.getLogger(RouteGrpcService.class);
 
   private final PolicyService policies;
-  private final DecisionGrpcService decisions;
+  private final RouteConfigService routeConfigs;
+  private final DecisionPublisher decisions;
   private final ObjectMapper mapper;
 
-  public RouteGrpcService(PolicyService policies, DecisionGrpcService decisions, ObjectMapper mapper) {
+  public RouteGrpcService(
+      PolicyService policies, RouteConfigService routeConfigs, DecisionPublisher decisions, ObjectMapper mapper) {
     this.policies = policies;
+    this.routeConfigs = routeConfigs;
     this.decisions = decisions;
     this.mapper = mapper;
   }
@@ -69,7 +76,9 @@ public class RouteGrpcService extends RouteServiceGrpc.RouteServiceImplBase {
           "registered route {}/{} (generation={}, {} rule(s))",
           namespace, name, saved.generation(), request.getRulesCount());
 
-      responseObserver.onNext(toRouteConfig(request, saved.generation()));
+      RouteConfigDtos.Response config =
+          routeConfigs.get(namespace, name).orElseThrow(); // just upserted above; must exist
+      responseObserver.onNext(toProto(request.getRef(), config));
       responseObserver.onCompleted();
     } catch (Exception e) {
       log.error("RegisterRoute failed", e);
@@ -94,15 +103,15 @@ public class RouteGrpcService extends RouteServiceGrpc.RouteServiceImplBase {
 
   @Override
   public void getRouteConfig(RouteRef request, StreamObserver<RouteConfig> responseObserver) {
-    Optional<Response> found = policies.tryGet(request.getNamespace(), request.getName());
-    if (found.isEmpty()) {
+    Optional<RouteConfigDtos.Response> config = routeConfigs.get(request.getNamespace(), request.getName());
+    if (config.isEmpty()) {
       responseObserver.onError(
           Status.NOT_FOUND
               .withDescription("route %s/%s not found".formatted(request.getNamespace(), request.getName()))
               .asRuntimeException());
       return;
     }
-    responseObserver.onNext(routeConfigFromStoredSpec(request, found.get()));
+    responseObserver.onNext(toProto(request, config.get()));
     responseObserver.onCompleted();
   }
 
@@ -113,7 +122,7 @@ public class RouteGrpcService extends RouteServiceGrpc.RouteServiceImplBase {
       for (var version : rule.getVersionsList()) {
         Integer old = oldForPath.get(version.getName());
         if (old != null && old != version.getWeight()) {
-          decisions.broadcast(
+          decisions.publish(
               Decision.newBuilder()
                   .setRef(ref)
                   .setPath(rule.getPath())
@@ -140,29 +149,12 @@ public class RouteGrpcService extends RouteServiceGrpc.RouteServiceImplBase {
     return out;
   }
 
-  private static RouteConfig toRouteConfig(RouteSpec spec, long generation) {
-    RouteConfig.Builder config = RouteConfig.newBuilder().setRef(spec.getRef()).setGeneration(generation);
-    for (var rule : spec.getRulesList()) {
-      RuleWeights.Builder weights = RuleWeights.newBuilder().setPath(rule.getPath());
-      for (var version : rule.getVersionsList()) {
-        weights.addWeights(
-            VersionWeight.newBuilder().setVersion(version.getName()).setWeight(version.getWeight()));
-      }
-      config.addRules(weights);
-    }
-    return config.build();
-  }
-
-  private static RouteConfig routeConfigFromStoredSpec(RouteRef ref, Response policy) {
-    RouteConfig.Builder config =
-        RouteConfig.newBuilder().setRef(ref).setGeneration(policy.generation());
-    for (JsonNode rule : policy.spec().path("rules")) {
-      RuleWeights.Builder weights = RuleWeights.newBuilder().setPath(rule.path("path").asText());
-      for (JsonNode version : rule.path("versions")) {
-        weights.addWeights(
-            VersionWeight.newBuilder()
-                .setVersion(version.path("name").asText())
-                .setWeight(version.path("weight").asInt()));
+  private static RouteConfig toProto(RouteRef ref, RouteConfigDtos.Response dto) {
+    RouteConfig.Builder config = RouteConfig.newBuilder().setRef(ref).setGeneration(dto.generation());
+    for (var rule : dto.rules()) {
+      RuleWeights.Builder weights = RuleWeights.newBuilder().setPath(rule.path());
+      for (var v : rule.weights()) {
+        weights.addWeights(VersionWeight.newBuilder().setVersion(v.version()).setWeight(v.weight()));
       }
       config.addRules(weights);
     }

@@ -31,6 +31,18 @@ type Rule struct {
 	Path        string
 	BackendName string
 	Servers     []Server
+	Resilience  *Resilience
+}
+
+// Resilience is spec.resilience translated into HAProxy-native terms. HAProxy
+// has no per-try-vs-overall timeout distinction, so ConnectTimeoutMS/TimeoutMS
+// map onto its "timeout connect"/"timeout server" directives directly, and
+// RetryOn is already normalized to HAProxy's own retry-on tokens.
+type Resilience struct {
+	TimeoutMS        int
+	ConnectTimeoutMS int
+	Retries          int
+	RetryOn          []string
 }
 
 // Server is one concrete upstream endpoint.
@@ -60,7 +72,7 @@ func Build(host string, routes []trafficv1alpha1.RouteRule, resolutions map[stri
 			port = rule.Backend.Port
 		}
 
-		r := Rule{Path: path, BackendName: backendName(host, path)}
+		r := Rule{Path: path, BackendName: backendName(host, path), Resilience: buildResilience(rule.Resilience)}
 
 		for _, es := range res.Versions {
 			weights := apportion(specWeight(rule, es.Version), len(es.Addresses))
@@ -108,6 +120,46 @@ func apportion(versionWeight int32, n int) []int {
 			w = 256
 		}
 		out[i] = w
+	}
+	return out
+}
+
+// retryOnTokens maps the CRD's retryOn enum to HAProxy's own retry-on tokens.
+// HAProxy has no "reset" or "retriable-status-codes" token; the closest native
+// equivalents are used (see README Phase 11 notes).
+var retryOnTokens = map[string]string{
+	"5xx":                    "5xx",
+	"gateway-error":          "502 503 504",
+	"connect-failure":        "conn-failure",
+	"reset":                  "empty-response conn-failure",
+	"retriable-status-codes": "all-retryable-errors",
+}
+
+// buildResilience translates the CRD's optional resilience block into
+// HAProxy-native terms. Returns nil when the rule declares none, so rules
+// without spec.resilience render byte-identically to before Phase 11.
+func buildResilience(r *trafficv1alpha1.ResiliencePolicy) *Resilience {
+	if r == nil {
+		return nil
+	}
+	out := &Resilience{
+		TimeoutMS:        int(r.Timeout.Duration.Milliseconds()),
+		ConnectTimeoutMS: int(r.Timeout.Duration.Milliseconds()),
+	}
+	if r.Retries != nil {
+		out.Retries = int(r.Retries.Attempts)
+		if perTry := r.Retries.PerTryTimeout.Duration.Milliseconds(); perTry > 0 {
+			out.TimeoutMS = int(perTry)
+		}
+		seen := map[string]bool{}
+		for _, ro := range r.Retries.RetryOn {
+			token := retryOnTokens[ro]
+			if token == "" || seen[token] {
+				continue
+			}
+			seen[token] = true
+			out.RetryOn = append(out.RetryOn, token)
+		}
 	}
 	return out
 }

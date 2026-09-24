@@ -25,4 +25,24 @@ public interface VersionWeightOrBuilder extends
    * @return The weight.
    */
   int getWeight();
+
+  /**
+   * <pre>
+   * "" | CLOSED | OPEN | HALF_OPEN — empty when no circuit breaker is active.
+   * </pre>
+   *
+   * <code>string circuit_state = 3;</code>
+   * @return The circuitState.
+   */
+  java.lang.String getCircuitState();
+  /**
+   * <pre>
+   * "" | CLOSED | OPEN | HALF_OPEN — empty when no circuit breaker is active.
+   * </pre>
+   *
+   * <code>string circuit_state = 3;</code>
+   * @return The bytes for circuitState.
+   */
+  com.google.protobuf.ByteString
+      getCircuitStateBytes();
 }

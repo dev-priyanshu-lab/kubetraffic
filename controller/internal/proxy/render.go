@@ -54,7 +54,9 @@ frontend stats
 
 `
 
-var configTmpl = template.Must(template.New("haproxy").Funcs(template.FuncMap{}).Parse(
+var configTmpl = template.Must(template.New("haproxy").Funcs(template.FuncMap{
+	"join": strings.Join,
+}).Parse(
 	`frontend kubetraffic
     bind :8080
     http-request set-var(txn.host) req.hdr(host),lower,field(1,:)
@@ -69,6 +71,21 @@ backend kubetraffic_no_route
 backend {{ .BackendName }}
     balance roundrobin
     option httpchk GET /healthz
+{{- with .Resilience }}
+{{- if gt .ConnectTimeoutMS 0 }}
+    timeout connect {{ .ConnectTimeoutMS }}ms
+{{- end }}
+{{- if gt .TimeoutMS 0 }}
+    timeout server {{ .TimeoutMS }}ms
+{{- end }}
+{{- if gt .Retries 0 }}
+    retries {{ .Retries }}
+    option redispatch
+{{- if .RetryOn }}
+    retry-on {{ join .RetryOn " " }}
+{{- end }}
+{{- end }}
+{{- end }}
 {{- range .Servers }}
     server {{ .Name }} {{ .Address }}:{{ .Port }} weight {{ .Weight }} check inter 5s fall 3 rise 2
 {{- end }}
