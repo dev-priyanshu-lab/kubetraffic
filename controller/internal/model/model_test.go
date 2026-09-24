@@ -210,7 +210,7 @@ func TestBuild_ResilienceTranslatedToHAProxyTerms(t *testing.T) {
 	if r.Retries != 3 {
 		t.Fatalf("Retries = %d, want 3", r.Retries)
 	}
-	if want := []string{"5xx", "conn-failure"}; !equalStrings(r.RetryOn, want) {
+	if want := []string{"500 501 502 503 504", "conn-failure"}; !equalStrings(r.RetryOn, want) {
 		t.Fatalf("RetryOn = %v, want %v (deduped, mapped to HAProxy tokens)", r.RetryOn, want)
 	}
 }

@@ -128,7 +128,7 @@ func apportion(versionWeight int32, n int) []int {
 // HAProxy has no "reset" or "retriable-status-codes" token; the closest native
 // equivalents are used (see README Phase 11 notes).
 var retryOnTokens = map[string]string{
-	"5xx":                    "5xx",
+	"5xx":                    "500 501 502 503 504",
 	"gateway-error":          "502 503 504",
 	"connect-failure":        "conn-failure",
 	"reset":                  "empty-response conn-failure",

@@ -88,7 +88,7 @@ func TestRender_ResiliencePerBackend(t *testing.T) {
 				TimeoutMS:        2000,
 				ConnectTimeoutMS: 2000,
 				Retries:          3,
-				RetryOn:          []string{"5xx", "conn-failure"},
+				RetryOn:          []string{"500 501 502 503 504", "conn-failure"},
 			},
 			Servers: []model.Server{
 				{Name: "v1-0", Address: "10.0.0.1", Port: 8080, Weight: 100, Version: "v1"},
@@ -104,7 +104,7 @@ func TestRender_ResiliencePerBackend(t *testing.T) {
 		"timeout server 2000ms",
 		"retries 3",
 		"option redispatch",
-		"retry-on 5xx conn-failure",
+		"retry-on 500 501 502 503 504 conn-failure",
 	} {
 		if !strings.Contains(cfg.Raw, want) {
 			t.Fatalf("rendered config missing %q\n---\n%s", want, cfg.Raw)
